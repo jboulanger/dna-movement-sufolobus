@@ -197,7 +197,7 @@ def process(filename: str):
     return img, mask, position, speed, diff, flow, rho, div
 
 
-def save(
+def save_result(
     filename: str,
     name: str,
     img: np.ndarray,
@@ -247,14 +247,26 @@ def save(
         f.create_dataset(f"{sname}/div", data=div)
 
 
-def inspect_file(filename):
+def inspect_result(filename):
+    """Inpsect the content of the result file
+
+    Parameter
+    ---------
+    filename: str | Path
+        Path to the result HDF5 file
+
+    Returns
+    -------
+    HDF5 groups names corresponding to the processed items
+    """
     groups = None
     with h5py.File(filename, "r") as f:
         groups = [k for k in f]
     return groups
 
 
-def load(filename: str, name: str):
+def load_result(filename: str, name: str):
+    """Load the result from a HDF5 file"""
     with h5py.File(filename, "r") as f:
         img = np.array(f[name]["img"]).copy()
         mask = np.array(f[name]["mask"]).copy()
@@ -432,3 +444,30 @@ def strip(
 
     fig.suptitle(Path(name).stem)
     plt.subplots_adjust(wspace=0, hspace=0)
+
+
+def make_vector(data, step=2):
+    """Create a vector array for napari visualization"""
+    step = 2
+    x, y = np.meshgrid(
+        *[np.arange(0, n, step) for n in [data.shape[2], data.shape[3]]], indexing="xy"
+    )
+    return np.concatenate(
+        [
+            np.stack(
+                (
+                    np.stack((k * np.ones(x.size), y.ravel(), x.ravel()), 1),
+                    np.stack(
+                        (
+                            np.zeros(x.size),
+                            (f[0, ::step, ::step]).ravel(),
+                            (f[1, ::step, ::step]).ravel(),
+                        ),
+                        1,
+                    ),
+                ),
+                1,
+            )
+            for k, f in enumerate(data)
+        ]
+    )
