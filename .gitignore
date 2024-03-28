@@ -1,0 +1,6 @@
+*.pdf
+*.csv
+__pycache__
+*.png
+Example*
+*.h5
