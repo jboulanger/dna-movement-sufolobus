@@ -40,6 +40,7 @@ def preprocess(img: np.ndarray, background: float):
 
 def segment_and_track(img: np.ndarray):
     """Segment and track centermost objects
+
     Parameter
     ---------
     img : np.narray
@@ -157,6 +158,79 @@ def average(value: np.ndarray, weights: np.ndarray) -> np.ndarray:
     )
 
 
+def dna_blob(img, mask):
+    """Analyze the blobs of DNA
+
+    Parameters
+    ----------
+    img: np.ndarray
+        (D,H,W) image stack
+    mask: np.ndarray
+        (D,H,W) mask stack
+
+    Returns
+    -------
+    blob : np.ndarray
+        segmented blobs labels
+    """
+    blob = img - ndi.gaussian_filter(img, [1, 5, 5])
+    blob = (blob > (np.median(blob) + 0.5 * blob.std())) * mask.squeeze()
+    blob = ndi.median_filter(blob, [3, 5, 5])
+    labels = np.stack([ndi.label(b)[0] for b in blob])
+    return labels
+
+
+def dna_blob_metrics(blob, img):
+    """Quantify dna blob intensity along time
+
+    Parameters
+    ----------
+    blob: np.ndarray
+        labels (D,W,H) for each time point
+    img: np.ndarray
+        intensity (D,W,H)
+
+    Returns
+    -------
+    count: np.ndarray
+        number of blobs
+    area: np.ndarray
+        area of the two biggest blobs
+    asymmetry_area: np.ndarray
+        area ratio of the smallest vs the sum of the two blobs
+    intensity: np.ndarray
+        suim of intensity of the two biggest blobs
+    asymmetry_int: np.ndarray
+        intensity ratio of the smallest vs the sum of the two blobs
+    """
+    asymmetry_area = np.zeros(blob.shape[0])
+    asymmetry_int = np.zeros(blob.shape[0])
+    count = np.zeros(img.shape[0])
+    area = np.zeros(img.shape[0])
+    intensity = np.zeros(img.shape[0])
+    for k, labels in enumerate(blob):
+        n = len(np.unique(labels)) - 1
+        count[k] = n
+        p = measure.regionprops_table(
+            labels, img[k], properties=("area", "mean_intensity")
+        )
+        p["sum_intensity"] = p["area"] * p["mean_intensity"]
+        if n == 1:
+            area[k] = p["area"][0]
+            intensity[k] = p["sum_intensity"][0]
+        if n >= 2:
+            perm = np.argsort(p["area"])[::-1]
+            area[k] = p["area"][perm[0]] + p["area"][perm[1]]
+            asymmetry_area[k] = p["area"][perm[1]] / (
+                p["area"][perm[0]] + p["area"][perm[1]]
+            )
+            intensity[k] = p["sum_intensity"][perm[0]] + p["sum_intensity"][perm[0]]
+            asymmetry_int[k] = p["sum_intensity"][perm[1]] / (
+                p["sum_intensity"][perm[0]] + p["sum_intensity"][perm[0]]
+            )
+    return count, area, asymmetry_area, intensity, asymmetry_int
+
+
 def process(filename: str):
     """Process the file
 
@@ -194,7 +268,8 @@ def process(filename: str):
     flow = compute_flow(pimg[:, 1])
     rho = momentum(pimg[:-1, 1], flow)
     div = divergence(rho)
-    return img, mask, position, speed, diff, flow, rho, div
+    blob = dna_blob(pimg[:, 1], mask)
+    return img, mask, position, speed, diff, flow, rho, div, blob
 
 
 def save_result(
@@ -208,6 +283,7 @@ def save_result(
     flow: np.ndarray,
     rho: np.ndarray,
     div: np.ndarray,
+    blob: np.ndarray,
 ):
     """Save results to a hdf5 file
 
@@ -233,6 +309,8 @@ def save_result(
         momentum rho.v [L,2,H,W]
     div: np.ndarray
         divergence of the momentum (div(rho.v))[L,1,H,W]
+    blob: np.ndarray
+        mask of the segmented DNA blobs
     """
     sname = Path(name).stem
     with h5py.File(filename, "a") as f:
@@ -245,10 +323,11 @@ def save_result(
         f.create_dataset(f"{sname}/flow", data=flow)
         f.create_dataset(f"{sname}/rho", data=rho)
         f.create_dataset(f"{sname}/div", data=div)
+        f.create_dataset(f"{sname}/blob", data=blob)
 
 
 def inspect_result(filename):
-    """Inpsect the content of the result file
+    """Inspect the content of the result file
 
     Parameter
     ---------
@@ -276,11 +355,16 @@ def load_result(filename: str, name: str):
         flow = np.array(f[name]["flow"]).copy()
         rho = np.array(f[name]["rho"]).copy()
         div = np.array(f[name]["div"]).copy()
-    return img, mask, position, speed, diff, flow, rho, div
+        blob = np.array(f[name]["blob"]).copy()
+    return img, mask, position, speed, diff, flow, rho, div, blob
 
 
-def record(filename, img, mask, position, speed, diff, flow, rho, div):
+def record(filename, img, mask, position, speed, diff, flow, rho, div, blob):
     """Record the results in a dataframe"""
+
+    count, area, asymmetry_area, intensity, asymmetry_int = dna_blob_metrics(
+        blob, img[:, 1]
+    )
     df = pd.DataFrame(
         {
             "filename": [filename] * (position.shape[0] - 1),
@@ -289,19 +373,28 @@ def record(filename, img, mask, position, speed, diff, flow, rho, div):
             "position-y": position[:-1, 0],
             "displacement-x": speed[:, 1],
             "displacement-y": speed[:, 0],
-            "dna": average(np.expand_dims(img[:-1, 1], 1), mask[:-1]),
-            "cellmask": average(np.expand_dims(img[:-1, 1], 1), mask[:-1]),
+            "dna mean intensity": average(np.expand_dims(img[:-1, 1], 1), mask[:-1]),
             "diff": average(diff, mask[:-1]),
             "flow": average(flow, mask[:-1]),
             "momemtum": average(rho, mask[:-1]),
             "divergence": average(div, mask[:-1]),
+            "dna blob count": count[:-1],
+            "dna blob area": area[:-1],
+            "dna blob area asymmetry": asymmetry_area[:-1],
+            "dna blob intensity": intensity[:-1],
+            "dna blob intensity asymmetry": asymmetry_int[:-1],
         }
     )
     return df
 
 
-def figure(ax, name, img, mask, position, speed, diff, flow, rho, div):
+def figure(
+    ax, name, img, mask, position, speed, diff, flow, rho, div, blob, title=True
+):
     """Create a figure with graphs over time"""
+
+    count, area, asym_area, intensity, asym_int = dna_blob_metrics(blob, img[:, 1])
+
     ax[0].imshow(uv2rgb(img[0]))
     ax[0].set_axis_off()
     for c in measure.find_contours(mask[0, 0].astype(int), 0.5):
@@ -310,22 +403,101 @@ def figure(ax, name, img, mask, position, speed, diff, flow, rho, div):
     ax[0].text(-10, img.shape[2], Path(name).stem, fontsize=6, rotation=90)
 
     ax[1].plot(average(np.expand_dims(img[:-1, 1], 1), mask[:-1]))
-    ax[1].set(box_aspect=1, xlabel="time [frame]", ylabel="dna")
+    if title:
+        ax[1].set(
+            box_aspect=1, xlabel="time [frame]", title="dna mean intensity", ylim=0
+        )
+    else:
+        ax[1].set(
+            box_aspect=1, xlabel="time [frame]", ylabel="dna mean intensity", ylim=0
+        )
 
     ax[2].plot(average(diff, mask[:-1]))
-    ax[2].set(box_aspect=1, xlabel="time [frame]", ylabel="diff")
+    if title:
+        ax[2].set(box_aspect=1, xlabel="time [frame]", title="diff", ylim=0)
+    else:
+        ax[2].set(box_aspect=1, xlabel="time [frame]", ylabel="diff", ylim=0)
 
     ax[3].plot(average(flow, mask[:-1]))
-    ax[3].set(box_aspect=1, xlabel="time [frame]", ylabel="flow")
+    if title:
+        ax[3].set(box_aspect=1, xlabel="time [frame]", ylabel="flow", ylim=0)
+    else:
+        ax[3].set(box_aspect=1, xlabel="time [frame]", title="flow", ylim=0)
 
     ax[4].plot(average(rho, mask[:-1]))
-    ax[4].set(box_aspect=1, xlabel="time [frame]", ylabel="momentum")
+    if title:
+        ax[4].set(box_aspect=1, xlabel="time [frame]", ylabel="momentum", ylim=0)
+    else:
+        ax[4].set(box_aspect=1, xlabel="time [frame]", title="momentum", ylim=0)
 
     ax[5].plot(average(div, mask[:-1]))
-    ax[5].set(box_aspect=1, xlabel="time [frame]", ylabel="divergence")
+    if title:
+        ax[5].set(box_aspect=1, xlabel="time [frame]", title="divergence", ylim=0)
+    else:
+        ax[5].set(box_aspect=1, xlabel="time [frame]", ylabel="divergence", ylim=0)
+
+    ax[6].plot(count[:-1])
+    if title:
+        ax[6].set(box_aspect=1, xlabel="time [frame]", title="count", ylim=0)
+    else:
+        ax[6].set(box_aspect=1, xlabel="time [frame]", ylabel="count", ylim=0)
+
+    ax[7].plot(area[:-1])
+    if title:
+        ax[7].set(box_aspect=1, xlabel="time [frame]", title="dna blob area", ylim=0)
+    else:
+        ax[7].set(box_aspect=1, xlabel="time [frame]", ylabel="dna blob area", ylim=0)
+
+    ax[8].plot(asym_area[:-1])
+    if title:
+        ax[8].set(
+            box_aspect=1, xlabel="time [frame]", title="dna blob area asymmetry", ylim=0
+        )
+    else:
+        ax[8].set(
+            box_aspect=1,
+            xlabel="time [frame]",
+            ylabel="dna blob area asymmetry",
+            ylim=0,
+        )
+    ax[9].plot(intensity[:-1])
+    if title:
+        ax[9].set(
+            box_aspect=1, xlabel="time [frame]", title="dna blob sum intenity", ylim=0
+        )
+    else:
+        ax[9].set(
+            box_aspect=1, xlabel="time [frame]", ylabel="dna blob sum intenity", ylim=0
+        )
+
+    ax[10].plot(asym_int[:-1])
+    if title:
+        ax[10].set(
+            box_aspect=1,
+            xlabel="time [frame]",
+            title="dna blob intenity asymmetry",
+            ylim=0,
+        )
+    else:
+        ax[10].set(
+            box_aspect=1,
+            xlabel="time [frame]",
+            ylabel="dna blob intenity asymmetry",
+            ylim=0,
+        )
 
 
 def vec2rgb(x):
+    """HSV code a vectorial field to RGB using HSV
+
+    Parameters
+    ----------
+    x : np.ndarray
+        vector field (2,H,W)
+    Returns
+    -------
+    RGB stack (3,H,W)
+    """
     h = (np.arctan2(x[0], x[1]) + math.pi) / math.tau
     v = np.linalg.norm(x, axis=0)
     y = np.stack((h, v), -1).reshape(x.shape[1] * x.shape[2], 2)
@@ -348,6 +520,7 @@ def strip(
     flow,
     rho,
     div,
+    blob,
     colormap="Greys",
     step=5,
     quiver=False,
@@ -371,7 +544,9 @@ def strip(
         ax[0, k].imshow(uv2rgb(img[n]))
         ax[0, k].set_axis_off()
         for c in measure.find_contours(mask[n, 0], 0.5):
-            ax[0, k].plot(c[:, 1], c[:, 0], "w")
+            ax[0, k].plot(c[:, 1], c[:, 0], "white", alpha=0.8)
+        for c in measure.find_contours(blob[n] > 0, 0.5):
+            ax[0, k].plot(c[:, 1], c[:, 0], "#FFA500", alpha=0.8)
         ax[0, k].set(title=f"{n}")
         ax[1, k].imshow(
             (diff[n] * mask[n]).squeeze(), vmin=-dmax, vmax=dmax, cmap=colormap
