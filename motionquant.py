@@ -405,11 +405,11 @@ def figure(
     ax[1].plot(average(np.expand_dims(img[:-1, 1], 1), mask[:-1]))
     if title:
         ax[1].set(
-            box_aspect=1, xlabel="time [frame]", title="dna mean intensity", ylim=0
+            box_aspect=1, xlabel="time [frame]", title="dna mean intensity", ylim=100
         )
     else:
         ax[1].set(
-            box_aspect=1, xlabel="time [frame]", ylabel="dna mean intensity", ylim=0
+            box_aspect=1, xlabel="time [frame]", ylabel="dna mean intensity", ylim=100
         )
 
     ax[2].plot(average(diff, mask[:-1]))
@@ -522,7 +522,7 @@ def strip(
     div,
     blob,
     colormap="Greys",
-    step=5,
+    selection=None,
     quiver=False,
 ):
     """Create a strip"""
@@ -534,7 +534,10 @@ def strip(
     X, Y = np.meshgrid(
         *[np.arange(0, n) for n in [img.shape[2], img.shape[3]]], indexing="xy"
     )
-    indices = np.arange(0, img.shape[0], step)
+    if selection is None:
+        indices = np.arange(0, img.shape[0], 20)
+    else:
+        indices = np.arange(selection.start, selection.stop, selection.step)
     fig, ax = plt.subplots(5, len(indices), figsize=(len(indices), 5))
     dmax = (np.abs(diff) * mask[:-1]).max() / 2
     vmax = (np.linalg.norm(flow, axis=1)).max() / 2
