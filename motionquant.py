@@ -34,7 +34,11 @@ def segment_watershed(frame: np.ndarray):
 def preprocess(img: np.ndarray, background: float):
     """Preprocess the image sequence with a gaussian blur"""
     return np.maximum(
-        ndi.gaussian_filter(img.astype(float) - background, [3, 0, 1, 1]), 0
+        ndi.median_filter(
+            ndi.gaussian_filter(img.astype(float) - background, [1, 0, 1, 1]),
+            [3, 0, 1, 1],
+        ),
+        0,
     )
 
 
@@ -400,91 +404,71 @@ def figure(
     for c in measure.find_contours(mask[0, 0].astype(int), 0.5):
         ax[0].plot(c[:, 1], c[:, 0], "w")
     ax[0].plot(position[:, 1], position[:, 0], "w", linewidth=1)
-    ax[0].text(-10, img.shape[2], Path(name).stem, fontsize=6, rotation=90)
+
+    ax[0].text(-10, img.shape[2], Path(name).stem, fontsize=8, rotation=90)
 
     ax[1].plot(average(np.expand_dims(img[:-1, 1], 1), mask[:-1]))
     if title:
-        ax[1].set(
-            box_aspect=1, xlabel="time [frame]", title="dna mean intensity", ylim=100
-        )
+        ax[1].set(box_aspect=1, title="dna mean intensity", ylim=100)
     else:
-        ax[1].set(
-            box_aspect=1, xlabel="time [frame]", ylabel="dna mean intensity", ylim=100
-        )
+        ax[1].set(box_aspect=1, ylim=100)
 
     ax[2].plot(average(diff, mask[:-1]))
     if title:
-        ax[2].set(box_aspect=1, xlabel="time [frame]", title="diff", ylim=0)
+        ax[2].set(box_aspect=1, title="diff", ylim=0)
     else:
-        ax[2].set(box_aspect=1, xlabel="time [frame]", ylabel="diff", ylim=0)
+        ax[2].set(box_aspect=1, ylim=0)
 
     ax[3].plot(average(flow, mask[:-1]))
     if title:
-        ax[3].set(box_aspect=1, xlabel="time [frame]", ylabel="flow", ylim=0)
+        ax[3].set(box_aspect=1, title="flow", ylim=0)
     else:
-        ax[3].set(box_aspect=1, xlabel="time [frame]", title="flow", ylim=0)
+        ax[3].set(box_aspect=1, ylim=0)
 
     ax[4].plot(average(rho, mask[:-1]))
     if title:
-        ax[4].set(box_aspect=1, xlabel="time [frame]", ylabel="momentum", ylim=0)
+        ax[4].set(box_aspect=1, title="momentum", ylim=0)
     else:
-        ax[4].set(box_aspect=1, xlabel="time [frame]", title="momentum", ylim=0)
+        ax[4].set(box_aspect=1, ylim=0)
 
     ax[5].plot(average(div, mask[:-1]))
     if title:
-        ax[5].set(box_aspect=1, xlabel="time [frame]", title="divergence", ylim=0)
+        ax[5].set(box_aspect=1, title="divergence", ylim=0)
     else:
-        ax[5].set(box_aspect=1, xlabel="time [frame]", ylabel="divergence", ylim=0)
+        ax[5].set(box_aspect=1, ylim=0)
 
     ax[6].plot(count[:-1])
     if title:
-        ax[6].set(box_aspect=1, xlabel="time [frame]", title="count", ylim=0)
+        ax[6].set(box_aspect=1, title="count", ylim=0)
     else:
-        ax[6].set(box_aspect=1, xlabel="time [frame]", ylabel="count", ylim=0)
+        ax[6].set(box_aspect=1, ylim=0)
 
     ax[7].plot(area[:-1])
     if title:
-        ax[7].set(box_aspect=1, xlabel="time [frame]", title="dna blob area", ylim=0)
+        ax[7].set(box_aspect=1, title="dna blob area", ylim=0)
     else:
-        ax[7].set(box_aspect=1, xlabel="time [frame]", ylabel="dna blob area", ylim=0)
+        ax[7].set(box_aspect=1, ylim=0)
 
     ax[8].plot(asym_area[:-1])
     if title:
-        ax[8].set(
-            box_aspect=1, xlabel="time [frame]", title="dna blob area asymmetry", ylim=0
-        )
+        ax[8].set(box_aspect=1, title="dna blob area asymmetry", ylim=0)
     else:
-        ax[8].set(
-            box_aspect=1,
-            xlabel="time [frame]",
-            ylabel="dna blob area asymmetry",
-            ylim=0,
-        )
+        ax[8].set(box_aspect=1, ylim=0)
     ax[9].plot(intensity[:-1])
     if title:
-        ax[9].set(
-            box_aspect=1, xlabel="time [frame]", title="dna blob sum intenity", ylim=0
-        )
+        ax[9].set(box_aspect=1, title="dna blob sum intenity", ylim=0)
     else:
-        ax[9].set(
-            box_aspect=1, xlabel="time [frame]", ylabel="dna blob sum intenity", ylim=0
-        )
+        ax[9].set(box_aspect=1, ylim=0)
 
     ax[10].plot(asym_int[:-1])
     if title:
         ax[10].set(
             box_aspect=1,
-            xlabel="time [frame]",
             title="dna blob intenity asymmetry",
             ylim=0,
         )
     else:
-        ax[10].set(
-            box_aspect=1,
-            xlabel="time [frame]",
-            ylabel="dna blob intenity asymmetry",
-            ylim=0,
-        )
+        ax[10].set(box_aspect=1, ylim=0)
 
 
 def vec2rgb(x):
