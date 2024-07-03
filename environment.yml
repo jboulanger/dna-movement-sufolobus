@@ -1,0 +1,13 @@
+name: dna-sufo
+channels:
+  - conda-forge
+  - pytorch
+dependencies:
+  - python
+  - pytorch
+  - pip
+  - skimage
+  - matplotlib
+  - pip:
+    - cellpose
+    - trackpy

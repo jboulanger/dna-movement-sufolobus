@@ -24,12 +24,11 @@ def uv2rgb(x: np.ndarray):
     return np.stack([contrast(x[0]), contrast(x[1]), contrast(x[0])], -1)
 
 
-def segment_watershed(frame: np.ndarray):
-    m = (frame[0] + frame[1]) > 5
-    d = ndi.gaussian_filter(ndi.distance_transform_edt(m), 4) * m
-    seed = ndi.label(d == ndi.maximum_filter(d, 5))[0] * m
-    labels = segmentation.watershed(-d, seed) * m
-    return labels
+def segment_watershed(mask: np.ndarray, r: int = 5):
+    d = ndi.gaussian_filter(ndi.distance_transform_edt(mask), r / 2) * mask
+    seed = ndi.label(d == ndi.maximum_filter(d, r))[0] * mask
+    labels = segmentation.watershed(-d, seed) * mask
+    return labels.astype(np.uint32)
 
 
 def preprocess(img: np.ndarray, background: float):
@@ -68,7 +67,7 @@ def segment_and_track(img: np.ndarray):
         labels = model.eval(frame, diameter=22)[0]
 
         if labels.max() == 0:
-            labels = segment_watershed(frame)
+            labels = segment_watershed((frame[0] + frame[1]) > 5)
 
         if labels.max() == 0:
             raise Exception(f"No cell found at frame {t}")
@@ -114,7 +113,7 @@ def segment_and_track_cell(img: np.ndarray):
         labels[t, 0] = model.eval(frame, diameter=22)[0]
 
         if labels[t, 0].max() == 0:
-            labels[t, 0] = segment_watershed(frame)
+            labels[t, 0] = segment_watershed((frame[0] + frame[1]) > 5)
 
         if labels[t, 0].max() == 0:
             if t > 0:
@@ -145,7 +144,7 @@ def segment_and_track_cell(img: np.ndarray):
     # track the cells
     tp.quiet()
 
-    trj = tp.link(df, 10, memory=2)
+    trj = tp.link(df, 20)
 
     # Keep the cell the most at the center at frame 0
     cell_to_keep = np.argmin(trj[trj["frame"] == 0]["distance to center"])
@@ -175,10 +174,14 @@ def segment_and_track_dna_blobs(img, mask):
     labels : np.ndarray
         segmented blobs labels sorted by track length
     """
+    # segment the blobs
     blob = img - ndi.gaussian_filter(img, [1, 5, 5])
     blob = (blob > (np.median(blob) + 0.5 * blob.std())) * mask.squeeze()
-    blob = ndi.median_filter(blob, [3, 5, 5])
-    blob = np.stack([ndi.label(b)[0] for b in blob])
+    for _ in range(3):
+        blob = ndi.median_filter(blob, [5, 3, 3])
+    blob = np.stack([segment_watershed(b, 4) for b in blob])
+
+    # get the centroids for each frame
     df = []
     for frame, labels in enumerate(blob):
         tmp = pd.DataFrame(
@@ -193,17 +196,24 @@ def segment_and_track_dna_blobs(img, mask):
     df = pd.concat(df, ignore_index=True).rename(
         columns={"centroid-0": "y", "centroid-1": "x", "mean_intensity": "mass"}
     )
+    # track the blobs
     tp.quiet()
-    trj = tp.link(df, 10, memory=2)
+    trj = tp.link(df, 25)
+
+    # reassign the labels by order of length
     ag = (
         trj.groupby("particle")["particle"]
         .agg(("count",))
         .sort_values("count", ascending=False)
     )
+
+    # mapping
+    tmap = {r.name: k + 1 for k, r in enumerate(ag.iloc)}
+
     labels = np.zeros(blob.shape)
     for row in trj.iloc:
         idx = blob[int(row["frame"])] == row["label"]
-        labels[int(row["frame"])][idx] = ag.index[int(row["particle"])] + 1
+        labels[int(row["frame"])][idx] = tmap[int(row["particle"])]
 
     return labels, trj
 
@@ -285,60 +295,6 @@ def average(value: np.ndarray, weights: np.ndarray) -> np.ndarray:
 
 def sum_intensity(mask, image):
     return [np.sum((mask == level) * image) for level in np.unique(mask) if level > 0]
-
-
-def dna_blob_metrics(blob, img):
-    """Quantify dna blob intensity along time
-
-    Parameters
-    ----------
-    blob: np.ndarray
-        labels (D,W,H) for each time point
-    img: np.ndarray
-        intensity (D,W,H)
-
-    Returns
-    -------
-    count: np.ndarray
-        number of blobs
-    area: np.ndarray
-        area of the two biggest blobs
-    asymmetry_area: np.ndarray
-        area ratio of the smallest vs the sum of the two blobs
-    intensity: np.ndarray
-        sum of intensity of the two biggest blobs
-    asymmetry_int: np.ndarray
-        intensity ratio of the smallest vs the sum of the two blobs
-    """
-    count = np.zeros(img.shape[0])
-    area0 = np.zeros(blob.shape[0])
-    area1 = np.zeros(blob.shape[0])
-    intensity0 = np.zeros(blob.shape[0])
-    intensity1 = np.zeros(blob.shape[0])
-
-    for k, labels in enumerate(blob):
-        n = len(np.unique(labels)) - 1
-        count[k] = n
-        p = measure.regionprops_table(
-            labels,
-            img[k],
-            properties=(
-                "area",
-                "mean_intensity",
-                "centroid",
-            ),
-            extra_properties=(sum_intensity,),
-        )
-        if n == 1:
-            area0[k] = p["area"][0]
-            intensity0[k] = p["sum_intensity-0"][0]
-        if n >= 2:
-            perm = np.argsort(p["area"])[::-1]
-            area[k] = p["area"][perm[0]] + p["area"][perm[1]]
-            asymmetry_area[k] = p["area"][perm[1]] / area[k]
-            intensity[k] = p["sum_intensity-0"][perm[0]] + p["sum_intensity-0"][perm[1]]
-            asymmetry_int[k] = p["sum_intensity-0"][perm[1]] / intensity[k]
-    return count, area, asymmetry_area, intensity, asymmetry_int
 
 
 def process(filename: str):
@@ -490,7 +446,7 @@ def record(
                     "cell-x": row["x"],
                     "cell-y": row["y"],
                     "cell-area": mask_area,
-                    "diff": np.sum(diff[frame] * cell_mask[frame])
+                    "frame difference": np.sum(diff[frame] * cell_mask[frame])
                     / np.sum(cell_mask[frame]),
                     "flow": np.sum(
                         np.linalg.norm(flow[frame], axis=0) * cell_mask[frame]
@@ -518,97 +474,34 @@ def record(
     return pd.DataFrame.from_records(df)
 
 
-def figure(
-    ax,
-    k,
-    cond,
-    name,
-    img,
-    mask,
-    position,
-    speed,
-    diff,
-    flow,
-    rho,
-    div,
-    blob,
-    title=True,
-):
-    """Create a figure with graphs over time"""
+def figure(filename, name, frame=0):
+    """Create a figure with graphs over time
+    The figure has xx columns
+    """
+    fig, ax = plt.subplots(1, 10, figsize=(20, 3))
+    img, cell_mask, cell_trj, diff, flow, rho, div, blob_labels, blob_trj = load_result(
+        filename, name
+    )
+    df = record(
+        filename, img, cell_mask, cell_trj, diff, flow, rho, div, blob_labels, blob_trj
+    )
 
-    count, area, asym_area, intensity, asym_int = dna_blob_metrics(blob, img[:, 1])
-
-    ax[0].imshow(uv2rgb(img[0]))
+    ax[0].imshow(uv2rgb(img[frame]))
     ax[0].set_axis_off()
-    for c in measure.find_contours(mask[0, 0].astype(int), 0.5):
+    for c in measure.find_contours(cell_mask[frame, 0], 0.5):
         ax[0].plot(c[:, 1], c[:, 0], "w")
-    ax[0].plot(position[:, 1], position[:, 0], "w", linewidth=1)
-    ax[0].text(-22, img.shape[2] / 2 + 10, f"{k}:{cond}", fontsize=12, rotation=90)
-    ax[0].text(-10, img.shape[2] / 2 + 10, Path(name).stem, fontsize=6, rotation=90)
+    for c in measure.find_contours((blob_labels[frame] > 0).astype(int), 0.5):
+        ax[0].plot(c[:, 1], c[:, 0], "#AABBBB")
 
-    ax[1].plot(average(np.expand_dims(img[:-1, 1], 1), mask[:-1]))
-    if title:
-        ax[1].set(box_aspect=1, title="dna mean intensity", ylim=100)
-    else:
-        ax[1].set(box_aspect=1, ylim=100)
+    ax[0].plot(df["cell-x"], df["cell-y"], "w", linewidth=1)
 
-    ax[2].plot(average(diff, mask[:-1]))
-    if title:
-        ax[2].set(box_aspect=1, title="diff", ylim=0)
-    else:
-        ax[2].set(box_aspect=1, ylim=0)
-
-    ax[3].plot(average(flow, mask[:-1]))
-    if title:
-        ax[3].set(box_aspect=1, title="flow", ylim=0)
-    else:
-        ax[3].set(box_aspect=1, ylim=0)
-
-    ax[4].plot(average(rho, mask[:-1]))
-    if title:
-        ax[4].set(box_aspect=1, title="momentum", ylim=0)
-    else:
-        ax[4].set(box_aspect=1, ylim=0)
-
-    ax[5].plot(average(div, mask[:-1]))
-    if title:
-        ax[5].set(box_aspect=1, title="divergence", ylim=0)
-    else:
-        ax[5].set(box_aspect=1, ylim=0)
-
-    ax[6].plot(count[:-1])
-    if title:
-        ax[6].set(box_aspect=1, title="count", ylim=0)
-    else:
-        ax[6].set(box_aspect=1, ylim=0)
-
-    ax[7].plot(area[:-1])
-    if title:
-        ax[7].set(box_aspect=1, title="dna blob area", ylim=0)
-    else:
-        ax[7].set(box_aspect=1, ylim=0)
-
-    ax[8].plot(asym_area[:-1])
-    if title:
-        ax[8].set(box_aspect=1, title="dna blob area asymmetry", ylim=0)
-    else:
-        ax[8].set(box_aspect=1, ylim=0)
-
-    ax[9].plot(intensity[:-1])
-    if title:
-        ax[9].set(box_aspect=1, title="dna blob sum intenity", ylim=0)
-    else:
-        ax[9].set(box_aspect=1, ylim=0)
-
-    ax[10].plot(asym_int[:-1])
-    if title:
-        ax[10].set(
-            box_aspect=1,
-            title="dna blob intenity asymmetry",
-            ylim=0,
-        )
-    else:
-        ax[10].set(box_aspect=1, ylim=0)
+    cols = df.columns[5:-2]
+    for k, col in enumerate(cols):
+        ax[k + 1].plot(df["frame"], df[col])
+        ax[k + 1].set(box_aspect=1, title=col)
+        if frame > 0:
+            y = ax[k + 1].axis()[2], ax[k + 1].axis()[3]
+            ax[k + 1].plot([frame, frame], y)
 
 
 def vec2rgb(x):
@@ -635,22 +528,16 @@ def vec2rgb(x):
 
 
 def strip(
+    filename,
     name,
-    img,
-    mask,
-    position,
-    speed,
-    diff,
-    flow,
-    rho,
-    div,
-    blob,
     colormap="Greys",
     selection=None,
     quiver=False,
 ):
     """Create a strip"""
-
+    img, cell_mask, cell_trj, diff, flow, rho, div, blob_labels, blob_trj = load_result(
+        filename, name
+    )
     s = 2
     x, y = np.meshgrid(
         *[np.arange(0, n, s) for n in [img.shape[2], img.shape[3]]], indexing="xy"
@@ -663,20 +550,20 @@ def strip(
     else:
         indices = np.arange(selection.start, selection.stop, selection.step)
     fig, ax = plt.subplots(5, len(indices), figsize=(len(indices), 5))
-    dmax = (np.abs(diff) * mask[:-1]).max() / 2
+    dmax = (np.abs(diff) * cell_mask[:-1]).max() / 2
     vmax = (np.linalg.norm(flow, axis=1)).max() / 2
     rmax = (np.linalg.norm(rho, axis=1)).max() / 2
-    drmax = (np.abs(div) * mask[:-1]).max() / 2
+    drmax = (np.abs(div) * cell_mask[:-1]).max() / 2
     for k, n in enumerate(indices):
         ax[0, k].imshow(uv2rgb(img[n]))
         ax[0, k].set_axis_off()
-        for c in measure.find_contours(mask[n, 0], 0.5):
+        for c in measure.find_contours(cell_mask[n, 0], 0.5):
             ax[0, k].plot(c[:, 1], c[:, 0], "white", alpha=0.8)
-        for c in measure.find_contours(blob[n] > 0, 0.5):
+        for c in measure.find_contours(blob_labels[n] > 0, 0.5):
             ax[0, k].plot(c[:, 1], c[:, 0], "#FFA500", alpha=0.8)
         ax[0, k].set(title=f"{n}")
         ax[1, k].imshow(
-            (diff[n] * mask[n]).squeeze(), vmin=-dmax, vmax=dmax, cmap=colormap
+            (diff[n] * cell_mask[n]).squeeze(), vmin=-dmax, vmax=dmax, cmap=colormap
         )
         ax[1, k].set_axis_off()
         ax[1, 0].text(-10, img.shape[2] / 2, "diff", rotation=90)
@@ -739,7 +626,7 @@ def strip(
         ax[3, 0].text(-10, img.shape[2] / 2, "mom", rotation=90)
 
         ax[4, k].imshow(
-            (div[n] * mask[n]).squeeze(), vmin=-drmax, vmax=drmax, cmap=colormap
+            (div[n] * cell_mask[n]).squeeze(), vmin=-drmax, vmax=drmax, cmap=colormap
         )
         ax[4, k].set_axis_off()
         ax[4, 0].text(-10, img.shape[2] / 2, "div", rotation=90)
