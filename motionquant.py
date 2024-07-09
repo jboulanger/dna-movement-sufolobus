@@ -28,6 +28,7 @@ def segment_watershed(mask: np.ndarray, r: int = 5):
     d = ndi.gaussian_filter(ndi.distance_transform_edt(mask), r / 2) * mask
     seed = ndi.label(d == ndi.maximum_filter(d, r))[0] * mask
     labels = segmentation.watershed(-d, seed) * mask
+    labels = np.unique(labels, return_inverse=1)[1].reshape(labels.shape)
     return labels.astype(np.uint32)
 
 
@@ -48,21 +49,19 @@ def preprocess(img: np.ndarray, background: float):
 
 
 def link(df, center):
-    """Link objects over time"""
+    """Link one objects over time using the nearest neighbor"""
     trj = []
     for frame in range(df["frame"].max()):
         sdf = df[df["frame"] == frame]
-        print(sdf[["centroid-0", "centroid-1", "label", "frame"]])
-        if len(sdf) > 0:
+        if len(sdf) == 1:
+            trj.append(sdf.iloc[0])
+        elif len(sdf) > 1:
             p = np.stack((sdf["centroid-0"], sdf["centroid-1"]), axis=1)
-            print(p, center)
-            k = np.argmin(np.linalg.norm(p - center, axis=0))
-            print(k)
+            k = np.argmin(np.linalg.norm(p - center, axis=1))
             if frame > 1:
                 center = (center + np.array(p[k])) / 2
             else:
                 center = np.array(p[k])
-            print(center)
             trj.append(sdf.iloc[k])
     trj = pd.DataFrame(trj)
     trj["particle"] = 1
@@ -134,21 +133,40 @@ def segment_and_track_cell(img: np.ndarray):
     shp = img.shape[0], 1, img.shape[2], img.shape[3]
     labels = np.zeros(shp, dtype=np.uint32)
     df = []
-
+    miss_counter = 0
     for t, frame in enumerate(img):
         # segment the cells
+        method = "cellpose"
         labels[t, 0] = model.eval(frame, diameter=22)[0]
 
         if labels[t, 0].max() == 0:
+            method = "watershed"
+            labels[t, 0] = segment_watershed((frame[0] + frame[1]) > 5)
+
+        if labels[t, 0].max() == 0:
+            method = "watershed"
             labels[t, 0] = segment_watershed((frame[0] + frame[1]) > 4)
 
         if labels[t, 0].max() == 0:
             if t > 0:
+                method = "propagate"
                 labels[t, 0] = labels[t - 1, 0]
+                miss_counter = miss_counter + 1
             else:
-                raise Exception(f"No cell found on first frame.")
+                raise Exception("No cell found on first frame.")
 
-        # measure centroids
+        # stop tracking if too many failed segmentation
+        if miss_counter > 5:
+            print(
+                f"Abort tracking at frame {t}. Segmentation failed more than 5 times."
+            )
+            break
+
+        # stop tracking if the intensity is zeros in the mask
+        if np.max(labels[t, 0] * img[t, 1]) == 0:
+            print(f"Abort tracking at frame {t}. Intensity is zeros in mask.")
+            break
+
         tmp = pd.DataFrame(
             measure.regionprops_table(
                 labels[t, 0],
@@ -162,7 +180,9 @@ def segment_and_track_cell(img: np.ndarray):
                 ),
             )
         )
+
         tmp["frame"] = t
+        tmp["segmentation"] = method
 
         df.append(tmp)
 
@@ -183,7 +203,7 @@ def segment_and_track_cell(img: np.ndarray):
         + np.square(df["centroid-1"] - img.shape[3] / 2)
     )
 
-    # track the cells
+    # # track the cells
     # tp.quiet()
     # trj = tp.link(df, 20, pos_columns=["centroid-0", "centroid-1"])
 
@@ -191,7 +211,8 @@ def segment_and_track_cell(img: np.ndarray):
     # cell_to_keep = np.argmin(trj[trj["frame"] == 0]["distance_to_center"])
     # trj = trj[trj["particle"] == cell_to_keep]
 
-    trj = link(df, np.array([img.shape[2], img.shape[3]]) / 2)
+    center = np.array([img.shape[2], img.shape[3]]) / 2
+    trj = link(df, center)
 
     # set the labels as the track id
     tracked_labels = np.zeros(labels.shape)
