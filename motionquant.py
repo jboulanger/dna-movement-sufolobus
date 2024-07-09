@@ -34,12 +34,39 @@ def segment_watershed(mask: np.ndarray, r: int = 5):
 def preprocess(img: np.ndarray, background: float):
     """Preprocess the image sequence with a gaussian blur"""
     return np.maximum(
-        ndi.median_filter(
-            ndi.gaussian_filter(img.astype(float) - background, [1, 0, 1, 1]),
-            [3, 1, 1, 1],
-        ),
+        ndi.gaussian_filter(img.astype(float) - background, [3, 0, 1, 1]),
         0,
     )
+
+    # return np.maximum(
+    #     ndi.median_filter(
+    #         ndi.gaussian_filter(img.astype(float) - background, [3, 0, 1, 1]),
+    #         [3, 1, 1, 1],
+    #     ),
+    #     0,
+    # )
+
+
+def link(df, center):
+    """Link objects over time"""
+    trj = []
+    for frame in range(df["frame"].max()):
+        sdf = df[df["frame"] == frame]
+        print(sdf[["centroid-0", "centroid-1", "label", "frame"]])
+        if len(sdf) > 0:
+            p = np.stack((sdf["centroid-0"], sdf["centroid-1"]), axis=1)
+            print(p, center)
+            k = np.argmin(np.linalg.norm(p - center, axis=0))
+            print(k)
+            if frame > 1:
+                center = (center + np.array(p[k])) / 2
+            else:
+                center = np.array(p[k])
+            print(center)
+            trj.append(sdf.iloc[k])
+    trj = pd.DataFrame(trj)
+    trj["particle"] = 1
+    return trj
 
 
 def segment_and_track(img: np.ndarray):
@@ -113,18 +140,26 @@ def segment_and_track_cell(img: np.ndarray):
         labels[t, 0] = model.eval(frame, diameter=22)[0]
 
         if labels[t, 0].max() == 0:
-            labels[t, 0] = segment_watershed((frame[0] + frame[1]) > 5)
+            labels[t, 0] = segment_watershed((frame[0] + frame[1]) > 4)
 
         if labels[t, 0].max() == 0:
             if t > 0:
                 labels[t, 0] = labels[t - 1, 0]
+            else:
+                raise Exception(f"No cell found on first frame.")
 
         # measure centroids
         tmp = pd.DataFrame(
             measure.regionprops_table(
                 labels[t, 0],
-                img[t, 0],
-                properties=("centroid", "mean_intensity", "label"),
+                img[t, 1],
+                properties=(
+                    "centroid",
+                    "mean_intensity",
+                    "label",
+                    "moments_weighted_normalized",
+                    "moments_weighted_hu",
+                ),
             )
         )
         tmp["frame"] = t
@@ -132,23 +167,31 @@ def segment_and_track_cell(img: np.ndarray):
         df.append(tmp)
 
     # massage the dataframe
-    df = pd.concat(df, ignore_index=True).rename(
-        columns={"centroid-0": "y", "centroid-1": "x", "mean_intensity": "mass"}
+    df = pd.concat(df, ignore_index=True)
+
+    df["spread"] = np.sqrt(
+        df["moments_weighted_normalized-2-0"] + df["moments_weighted_normalized-0-2"]
+    )
+
+    df["skew"] = np.abs(df["moments_weighted_normalized-3-0"]) + np.abs(
+        df["moments_weighted_normalized-0-3"]
     )
 
     # add the distance to center
-    df["distance to center"] = np.sqrt(
-        np.square(df["x"] - img.shape[-1] / 2) + np.square(df["y"] - img.shape[-2] / 2)
+    df["distance_to_center"] = np.sqrt(
+        np.square(df["centroid-0"] - img.shape[2] / 2)
+        + np.square(df["centroid-1"] - img.shape[3] / 2)
     )
 
     # track the cells
-    tp.quiet()
+    # tp.quiet()
+    # trj = tp.link(df, 20, pos_columns=["centroid-0", "centroid-1"])
 
-    trj = tp.link(df, 20)
+    # # Keep the cell the most at the center at frame 0
+    # cell_to_keep = np.argmin(trj[trj["frame"] == 0]["distance_to_center"])
+    # trj = trj[trj["particle"] == cell_to_keep]
 
-    # Keep the cell the most at the center at frame 0
-    cell_to_keep = np.argmin(trj[trj["frame"] == 0]["distance to center"])
-    trj = trj[trj["particle"] == cell_to_keep]
+    trj = link(df, np.array([img.shape[2], img.shape[3]]) / 2)
 
     # set the labels as the track id
     tracked_labels = np.zeros(labels.shape)
@@ -175,9 +218,14 @@ def segment_and_track_dna_blobs(img, mask):
         segmented blobs labels sorted by track length
     """
     # segment the blobs
-    blob = img - ndi.gaussian_filter(img, [1, 5, 5])
-    blob = (blob > (np.median(blob) + 0.5 * blob.std())) * mask.squeeze()
-    for _ in range(3):
+
+    blob = img - ndi.gaussian_filter(img, [3, 5, 5])
+    # f = np.maximum(blob, 0)
+    # blob = f
+    # for _ in range(5):  # u = u - h (hu - f)
+    #     blob = np.maximum(blob - 0.5 * (ndi.gaussian_filter(blob, [0, 2, 2]) - f), 0)
+    blob = (blob > (np.median(blob) + 0.1 * blob.std())) * mask.squeeze()
+    for _ in range(4):
         blob = ndi.median_filter(blob, [5, 3, 3])
     blob = np.stack([segment_watershed(b, 4) for b in blob])
 
@@ -188,32 +236,44 @@ def segment_and_track_dna_blobs(img, mask):
             measure.regionprops_table(
                 labels,
                 img[frame],
-                properties=("centroid", "mean_intensity", "label"),
+                properties=(
+                    "centroid",
+                    "mean_intensity",
+                    "label",
+                ),
             )
         )
         tmp["frame"] = frame
         df.append(tmp)
+
     df = pd.concat(df, ignore_index=True).rename(
         columns={"centroid-0": "y", "centroid-1": "x", "mean_intensity": "mass"}
     )
+
     # track the blobs
     tp.quiet()
-    trj = tp.link(df, 25)
+    trj = tp.link(df, 5)
 
     # reassign the labels by order of length
-    ag = (
-        trj.groupby("particle")["particle"]
-        .agg(("count",))
-        .sort_values("count", ascending=False)
-    )
+    # ag = (
+    #     trj.groupby("particle")["frame"]
+    #     .agg(("count",))
+    #     .sort_values("count", ascending=False)
+    # )
 
+    # reassign the labels by first frame
+    ag = trj.groupby("particle").agg("min").sort_values("frame")
     # mapping
     tmap = {r.name: k + 1 for k, r in enumerate(ag.iloc)}
 
+    # transform the trj dataframe
+    trj["particle"] = trj["particle"].apply(lambda x: tmap[x])
+
+    # map the labels to the tracked labels
     labels = np.zeros(blob.shape)
     for row in trj.iloc:
         idx = blob[int(row["frame"])] == row["label"]
-        labels[int(row["frame"])][idx] = tmap[int(row["particle"])]
+        labels[int(row["frame"])][idx] = int(row["particle"])
 
     return labels, trj
 
@@ -443,10 +503,10 @@ def record(
                 {
                     "filename": filename,
                     "frame": frame,
-                    "cell-x": row["x"],
-                    "cell-y": row["y"],
+                    "cell-x": row["centroid-1"],
+                    "cell-y": row["centroid-0"],
                     "cell-area": mask_area,
-                    "frame difference": np.sum(diff[frame] * cell_mask[frame])
+                    "frame difference": np.sum(np.abs(diff[frame]) * cell_mask[frame])
                     / np.sum(cell_mask[frame]),
                     "flow": np.sum(
                         np.linalg.norm(flow[frame], axis=0) * cell_mask[frame]
@@ -456,9 +516,11 @@ def record(
                         np.linalg.norm(rho[frame], axis=0) * cell_mask[frame]
                     )
                     / mask_area,
-                    "divergence": np.sum(div[frame] * cell_mask[frame]) / mask_area,
-                    "dna mean intensity": np.sum(img[frame, 1] * cell_mask[frame])
+                    "divergence": np.sum(np.abs(div[frame]) * cell_mask[frame])
                     / mask_area,
+                    "dna intensity mean": row["mean_intensity"],
+                    "dna intensity spread": row["spread"],
+                    "dna intensity skew": row["skew"],
                     "dna blob count": len(blob_trj[blob_trj["frame"] == frame]),
                     "dna blob area": np.sum(blob_labels[frame] > 0),
                     "dna blob 1 sum intensity": np.sum(
@@ -474,34 +536,73 @@ def record(
     return pd.DataFrame.from_records(df)
 
 
+def split_frame(df):
+    k = np.where(np.array(df["dna blob count"]) > 1.5)[0]
+    if len(k) > 0:
+        frame = df["frame"].iloc[k[0]].item()
+    else:
+        frame = 0
+    return frame
+
+
 def figure(filename, name, frame=0):
     """Create a figure with graphs over time
     The figure has xx columns
     """
-    fig, ax = plt.subplots(1, 10, figsize=(20, 3))
+
     img, cell_mask, cell_trj, diff, flow, rho, div, blob_labels, blob_trj = load_result(
         filename, name
     )
+
     df = record(
-        filename, img, cell_mask, cell_trj, diff, flow, rho, div, blob_labels, blob_trj
+        filename,
+        img,
+        cell_mask,
+        cell_trj,
+        diff,
+        flow,
+        rho,
+        div,
+        blob_labels,
+        blob_trj,
     )
 
+    if frame == "auto":
+        k = np.where(np.array(df["dna blob count"]) > 1.5)[0]
+        if len(k) > 0:
+            frame = df["frame"].iloc[k[0]].item()
+        else:
+            frame = 0
+
+    cols = df.columns[5:-2]
+
+    fig, ax = plt.subplots(3, (len(cols) + 1) // 3, figsize=(12, 9))
+    ax = ax.ravel()
     ax[0].imshow(uv2rgb(img[frame]))
     ax[0].set_axis_off()
+    ax[0].set(title=f"frame:{frame}")
+
     for c in measure.find_contours(cell_mask[frame, 0], 0.5):
         ax[0].plot(c[:, 1], c[:, 0], "w")
+
     for c in measure.find_contours((blob_labels[frame] > 0).astype(int), 0.5):
-        ax[0].plot(c[:, 1], c[:, 0], "#AABBBB")
+        ax[0].plot(c[:, 1], c[:, 0], "orange")
 
     ax[0].plot(df["cell-x"], df["cell-y"], "w", linewidth=1)
 
-    cols = df.columns[5:-2]
     for k, col in enumerate(cols):
-        ax[k + 1].plot(df["frame"], df[col])
-        ax[k + 1].set(box_aspect=1, title=col)
+        ax[k + 1].plot(df["frame"], df[col], color="#87ceeb", alpha=0.75)
+        if k < 7:
+            smoothed = ndi.gaussian_filter1d(df[col], sigma=5)
+            ax[k + 1].plot(df["frame"], smoothed, color="#0072A0")
         if frame > 0:
             y = ax[k + 1].axis()[2], ax[k + 1].axis()[3]
-            ax[k + 1].plot([frame, frame], y)
+            ax[k + 1].plot([frame, frame], y, color="orange", alpha=0.75)
+            ax[k + 1].set(box_aspect=1, title=col, ylim=y)
+        else:
+            ax[k + 1].set(box_aspect=1, title=col)
+
+    fig.set_tight_layout(True)
 
 
 def vec2rgb(x):

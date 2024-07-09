@@ -16,5 +16,6 @@ Several motion metrics are reported:
 
 ## Usage
 - 1_Process.ipynb: measure motion in TIF files and save results in a h5 file
-- 2_Graph.ipynb: visualize the results saved in the h5 file and save figures.
+- 2_Graph.ipynb: visualize the results saved in the h5 file.
+    
 
