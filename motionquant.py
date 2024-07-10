@@ -155,14 +155,12 @@ def segment_and_track_cell(img: np.ndarray):
             else:
                 raise Exception("No cell found on first frame.")
 
-        # stop tracking if too many failed segmentation
         if miss_counter > 5:
             print(
                 f"Abort tracking at frame {t}. Segmentation failed more than 5 times."
             )
             break
 
-        # stop tracking if the intensity is zeros in the mask
         if np.max(labels[t, 0] * img[t, 1]) == 0:
             print(f"Abort tracking at frame {t}. Intensity is zeros in mask.")
             break
@@ -240,15 +238,9 @@ def segment_and_track_dna_blobs(img, mask):
     """
     # segment the blobs
 
-    blob = img - ndi.gaussian_filter(img, [3, 5, 5])
-    # f = np.maximum(blob, 0)
-    # blob = f
-    # for _ in range(5):  # u = u - h (hu - f)
-    #     blob = np.maximum(blob - 0.5 * (ndi.gaussian_filter(blob, [0, 2, 2]) - f), 0)
-    blob = (blob > (np.median(blob) + 0.1 * blob.std())) * mask.squeeze()
-    for _ in range(4):
-        blob = ndi.median_filter(blob, [5, 3, 3])
-    blob = np.stack([segment_watershed(b, 4) for b in blob])
+    blob = img - ndi.gaussian_filter(img, [5, 5, 5])
+    blob = (blob > (np.median(blob) + 0.5 * blob.std())) * mask.squeeze()
+    blob = np.stack([segment_watershed(b, 5) for b in blob])
 
     # get the centroids for each frame
     df = []
@@ -606,8 +598,9 @@ def figure(filename, name, frame=0):
     for c in measure.find_contours(cell_mask[frame, 0], 0.5):
         ax[0].plot(c[:, 1], c[:, 0], "w")
 
-    for c in measure.find_contours((blob_labels[frame] > 0).astype(int), 0.5):
-        ax[0].plot(c[:, 1], c[:, 0], "orange")
+    for level in range(1, int(blob_labels[frame].max() + 1)):
+        for c in measure.find_contours((blob_labels[frame] == level).astype(int), 0.5):
+            ax[0].plot(c[:, 1], c[:, 0], "orange")
 
     ax[0].plot(df["cell-x"], df["cell-y"], "w", linewidth=1)
 
@@ -677,12 +670,15 @@ def strip(
     rmax = (np.linalg.norm(rho, axis=1)).max() / 2
     drmax = (np.abs(div) * cell_mask[:-1]).max() / 2
     for k, n in enumerate(indices):
+        if n >= img.shape[0]:
+            break
         ax[0, k].imshow(uv2rgb(img[n]))
         ax[0, k].set_axis_off()
         for c in measure.find_contours(cell_mask[n, 0], 0.5):
             ax[0, k].plot(c[:, 1], c[:, 0], "white", alpha=0.8)
-        for c in measure.find_contours(blob_labels[n] > 0, 0.5):
-            ax[0, k].plot(c[:, 1], c[:, 0], "#FFA500", alpha=0.8)
+        for level in range(1, int(blob_labels[n].max() + 1)):
+            for c in measure.find_contours((blob_labels[n] == level).astype(int), 0.5):
+                ax[0, k].plot(c[:, 1], c[:, 0], "#FFA500", alpha=0.8)
         ax[0, k].set(title=f"{n}")
         ax[1, k].imshow(
             (diff[n] * cell_mask[n]).squeeze(), vmin=-dmax, vmax=dmax, cmap=colormap
