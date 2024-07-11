@@ -238,8 +238,12 @@ def segment_and_track_dna_blobs(img, mask):
     """
     # segment the blobs
 
-    blob = img - ndi.gaussian_filter(img, [5, 5, 5])
+    blob = img.astype(float)
+    blob = blob - ndi.gaussian_filter(blob, [5, 5, 5])
     blob = (blob > (np.median(blob) + 0.5 * blob.std())) * mask.squeeze()
+    for _ in range(3):
+        blob = ndi.median_filter(blob, [1, 3, 3])
+
     blob = np.stack([segment_watershed(b, 5) for b in blob])
 
     # get the centroids for each frame
