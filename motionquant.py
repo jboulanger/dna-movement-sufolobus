@@ -171,6 +171,7 @@ def segment_and_track_cell(img: np.ndarray):
                 img[t, 1],
                 properties=(
                     "centroid",
+                    "area",
                     "mean_intensity",
                     "label",
                     "moments_weighted_normalized",
@@ -201,7 +202,7 @@ def segment_and_track_cell(img: np.ndarray):
         + np.square(df["centroid-1"] - img.shape[3] / 2)
     )
 
-    # # track the cells
+    # # track the cells with trackpy
     # tp.quiet()
     # trj = tp.link(df, 20, pos_columns=["centroid-0", "centroid-1"])
 
@@ -309,12 +310,18 @@ def frame_differences(img: np.ndarray) -> np.ndarray:
     return np.expand_dims(np.diff(img, 1, 0), 1)
 
 
-def compute_flow(img: np.ndarray):
+def compute_flow(img: np.ndarray, radius: int = 4):
     """Compute the flow for each frame in the sequence
+
     Parameters
     ----------
     img : np.ndarray
-        [T,1,H,W]
+        [T,1,H,W] image sequence (1 channel)
+
+    Returns
+    -------
+    img: np.ndarray
+        [T,2,H,W] flow
     """
     flows = []
     for reference, moving in zip(img[:-1], img[1:]):
@@ -323,7 +330,7 @@ def compute_flow(img: np.ndarray):
                 optical_flow_ilk(
                     reference,
                     moving,
-                    radius=4,
+                    radius=radius,
                     gaussian=True,
                     prefilter=True,
                 )
@@ -340,9 +347,10 @@ def divergence(flow: np.ndarray) -> np.ndarray:
     ----------
     flow : np.ndarray
         [T,2,H,W]
+
     Returns
     -------
-    divergence  [T,1,H,W]
+    Diveragence as a [T,1,H,W] np.ndarray
     """
     return np.expand_dims(
         np.gradient(flow[:, 0], axis=1)
@@ -358,7 +366,20 @@ def divergence(flow: np.ndarray) -> np.ndarray:
 
 
 def momentum(mass: np.ndarray, flow: np.ndarray) -> np.ndarray:
-    """Compute the momentum as mass x flow"""
+    """Compute the momentum as mass x flow
+
+    Parameters
+    ----------
+    mass : np.ndarray
+        [T,1,H,W]
+    flow : np.ndarray
+        [T,2,H,W]
+
+    Returns
+    -------
+    momentum as a [T,1,H,W] np.ndarray
+
+    """
     return np.expand_dims(mass, axis=1) * flow
 
 
@@ -407,7 +428,8 @@ def process(filename: str):
     pimg = preprocess(img, 100)
     cell_mask, cell_trj = segment_and_track_cell(pimg)
     diff = frame_differences(pimg[:, 1])
-    flow = compute_flow(pimg[:, 1])
+    flow_cells = compute_flow(pimg[:, 0], 10)
+    flow = compute_flow(pimg[:, 1]) - flow_cells
     rho = momentum(pimg[:-1, 1], flow)
     div = divergence(rho)
     blob_labels, blobs_trj = segment_and_track_dna_blobs(pimg[:, 1], cell_mask)
@@ -554,7 +576,7 @@ def record(
 
 
 def split_frame(df):
-    k = np.where(np.array(df["dna blob count"]) > 1.5)[0]
+    k = np.where(np.array(df["cell-area"]) < df["cell-area"].mean())[0]
     if len(k) > 0:
         frame = df["frame"].iloc[k[0]].item()
     else:
@@ -585,11 +607,7 @@ def figure(filename, name, frame=0):
     )
 
     if frame == "auto":
-        k = np.where(np.array(df["dna blob count"]) > 1.5)[0]
-        if len(k) > 0:
-            frame = df["frame"].iloc[k[0]].item()
-        else:
-            frame = 0
+        k = split_frame(df)
 
     cols = df.columns[5:-2]
 
