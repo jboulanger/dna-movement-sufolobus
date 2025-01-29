@@ -478,7 +478,13 @@ def save_result(
     blob_trj: pd.dataframe
     """
     sname = Path(name).stem
-    with h5py.File(filename, "a") as f:
+
+    if Path(filename).exists():
+        mode = "w"
+    else:
+        mode = "a"
+
+    with h5py.File(filename, mode) as f:
         f.create_group(sname)
         f.create_dataset(f"{sname}/img", data=img)
         f.create_dataset(f"{sname}/cell_mask", data=cell_mask)
