@@ -24,9 +24,9 @@ def uv2rgb(x: np.ndarray):
     return np.stack([contrast(x[0]), contrast(x[1]), contrast(x[0])], -1)
 
 
-def segment_watershed(mask: np.ndarray, r: int = 5):
-    d = ndi.gaussian_filter(ndi.distance_transform_edt(mask), r / 2) * mask
-    seed = ndi.label(d == ndi.maximum_filter(d, r))[0] * mask
+def segment_watershed(mask: np.ndarray, r: float = 5.0):
+    d = ndi.gaussian_filter(ndi.distance_transform_edt(mask), r / 2.0) * mask
+    seed = (ndi.label(d == ndi.maximum_filter(d, r))[0] * mask).astype(np.uint32)
     labels = segmentation.watershed(-d, seed) * mask
     labels = np.unique(labels, return_inverse=1)[1].reshape(labels.shape)
     return labels.astype(np.uint32)
@@ -245,7 +245,7 @@ def segment_and_track_dna_blobs(img, mask):
     for _ in range(3):
         blob = ndi.median_filter(blob, [1, 3, 3])
 
-    blob = np.stack([segment_watershed(b, 5) for b in blob])
+    blob = np.stack([segment_watershed(b, 5.0) for b in blob])
 
     # get the centroids for each frame
     df = []
