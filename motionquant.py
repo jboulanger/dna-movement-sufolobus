@@ -202,16 +202,16 @@ def segment_and_track_cell(img: np.ndarray):
         + np.square(df["centroid-1"] - img.shape[3] / 2)
     )
 
-    # # track the cells with trackpy
-    # tp.quiet()
-    # trj = tp.link(df, 20, pos_columns=["centroid-0", "centroid-1"])
+    # track the cells with trackpy
+    tp.quiet()
+    trj = tp.link(df, 20, pos_columns=["centroid-0", "centroid-1"])
 
-    # # Keep the cell the most at the center at frame 0
-    # cell_to_keep = np.argmin(trj[trj["frame"] == 0]["distance_to_center"])
-    # trj = trj[trj["particle"] == cell_to_keep]
+    # Keep the cell the most at the center at frame 0
+    cell_to_keep = np.argmin(trj[trj["frame"] == 0]["distance_to_center"])
+    trj = trj[trj["particle"] == cell_to_keep]
 
-    center = np.array([img.shape[2], img.shape[3]]) / 2
-    trj = link(df, center)
+    # center = np.array([img.shape[2], img.shape[3]]) / 2
+    # trj = link(df, center)
 
     # set the labels as the track id
     tracked_labels = np.zeros(labels.shape)
@@ -479,7 +479,7 @@ def save_result(
     """
     sname = Path(name).stem
 
-    with h5py.File(filename, "w") as f:
+    with h5py.File(filename, "a") as f:
         f.create_group(sname)
         f.create_dataset(f"{sname}/img", data=img)
         f.create_dataset(f"{sname}/cell_mask", data=cell_mask)
@@ -608,12 +608,13 @@ def figure(filename, name, frame=0):
     )
 
     if frame == "auto":
-        k = split_frame(df)
+        frame = split_frame(df)
 
     cols = df.columns[5:-2]
 
     fig, ax = plt.subplots(3, (len(cols) + 1) // 3, figsize=(12, 9))
     ax = ax.ravel()
+
     ax[0].imshow(uv2rgb(img[frame]))
     ax[0].set_axis_off()
     ax[0].set(title=f"frame:{frame}")
