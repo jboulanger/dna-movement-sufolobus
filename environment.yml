@@ -8,6 +8,8 @@ dependencies:
   - pip
   - skimage
   - matplotlib
+  - pandas
+  - pytables
   - pip:
     - cellpose
     - trackpy

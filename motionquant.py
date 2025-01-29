@@ -479,12 +479,7 @@ def save_result(
     """
     sname = Path(name).stem
 
-    if Path(filename).exists():
-        mode = "w"
-    else:
-        mode = "a"
-
-    with h5py.File(filename, mode) as f:
+    with h5py.File(filename, "w") as f:
         f.create_group(sname)
         f.create_dataset(f"{sname}/img", data=img)
         f.create_dataset(f"{sname}/cell_mask", data=cell_mask)
