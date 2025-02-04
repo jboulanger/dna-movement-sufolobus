@@ -12,11 +12,17 @@ echo "TASK ID : $SLURM_ARRAY_TASK_ID"
 source=/cephfs2/jparham/
 destination=/media/cephfs2/jeromeb/userdata/Baum_group/jparham/Analysis8
 
-apptainer exec \
-	--writable-tmpfs \
-	--bind /cephfs2:/cephfs2,/cephfs:/cephfs,/lmb:/lmb \
-	/public/singularity/containers/lightmicroscopy/bioimaging-container/bioimaging.sif \
-	/bin/micromamba run -n imaging \
+# apptainer exec \
+# 	--writable-tmpfs \
+# 	--bind /cephfs2:/cephfs2,/cephfs:/cephfs,/lmb:/lmb \
+# 	/public/singularity/containers/lightmicroscopy/bioimaging-container/bioimaging.sif \
+# 	/bin/micromamba run -n imaging \
+# 	python dnasufo.py \
+# 	-s $source \
+# 	-d $destination \
+# 	-n $SLURM_ARRAY_TASK_ID
+
+/bin/micromamba run -n imaging \
 	python dnasufo.py \
 	-s $source \
 	-d $destination \
