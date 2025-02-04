@@ -22,7 +22,7 @@ destination=/media/cephfs2/jeromeb/userdata/Baum_group/jparham/Analysis8
 # 	-d $destination \
 # 	-n $SLURM_ARRAY_TASK_ID
 
-micromamba run -n imaging \
+/lmb/home/jeromeb/.local/bin/micromamba run -n imaging \
 	python dnasufo.py \
 	-s $source \
 	-d $destination \
