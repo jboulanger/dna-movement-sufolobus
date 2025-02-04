@@ -113,13 +113,15 @@ def segment_and_track(img: np.ndarray):
     return np.expand_dims(mask, 1), position
 
 
-def segment_and_track_cell(img: np.ndarray):
+def segment_and_track_cell(img: np.ndarray, model=None):
     """Segment and track centermost objects
 
     Parameter
     ---------
     img : np.narray
         input with shape [T,C,H,W]
+    model: Cellpose
+        Cellpose model
 
     Returns
     -------
@@ -128,7 +130,8 @@ def segment_and_track_cell(img: np.ndarray):
     position: np.ndarray
         [T,2] position
     """
-    model = models.Cellpose(True, "cyto")
+    if model is None:
+        model = models.Cellpose(True, "cyto2")
 
     shp = img.shape[0], 1, img.shape[2], img.shape[3]
     labels = np.zeros(shp, dtype=np.uint32)
@@ -204,7 +207,7 @@ def segment_and_track_cell(img: np.ndarray):
 
     # track the cells with trackpy
     tp.quiet()
-    trj = tp.link(df, 20, pos_columns=["centroid-0", "centroid-1"])
+    trj = tp.link(df, search_range=20, pos_columns=["centroid-0", "centroid-1"])
 
     # Keep the cell the most at the center at frame 0
     cell_to_keep = np.argmin(trj[trj["frame"] == 0]["distance_to_center"])
@@ -237,8 +240,8 @@ def segment_and_track_dna_blobs(img, mask):
     labels : np.ndarray
         segmented blobs labels sorted by track length
     """
-    # segment the blobs
 
+    # segment the blobs
     blob = img.astype(float)
     blob = blob - ndi.gaussian_filter(blob, [5, 5, 5])
     blob = (blob > (np.median(blob) + 0.5 * blob.std())) * mask.squeeze()
@@ -264,13 +267,11 @@ def segment_and_track_dna_blobs(img, mask):
         tmp["frame"] = frame
         df.append(tmp)
 
-    df = pd.concat(df, ignore_index=True).rename(
-        columns={"centroid-0": "y", "centroid-1": "x", "mean_intensity": "mass"}
-    )
+    df = pd.concat(df, ignore_index=True)
 
     # track the blobs
     tp.quiet()
-    trj = tp.link(df, 5)
+    trj = tp.link(df, search_range=5, pos_columns=["centroid-0", "centroid-1"])
 
     # reassign the labels by order of length
     # ag = (
@@ -303,6 +304,7 @@ def frame_differences(img: np.ndarray) -> np.ndarray:
     ----------
     img : np.ndarray
         [T,C,H,W]
+
     Returns
     -------
     frame difference
@@ -489,6 +491,7 @@ def save_result(
         f.create_dataset(f"{sname}/div", data=div)
         f.create_dataset(f"{sname}/blob_labels", data=blob_labels)
 
+    # cell_trj and blob_trj are dataframes. Use panda to save them in the file
     cell_trj.to_hdf(filename, key=f"{sname}/cell_trj", mode="a")
     blob_trj.to_hdf(filename, key=f"{sname}/blob_trj", mode="a")
 
@@ -802,3 +805,52 @@ def make_vector(data, step=2):
             for k, f in enumerate(data)
         ]
     )
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser("dna-sufolobus")
+    parser.add_argument("-s", type=Path, required=False, help="path to the source data")
+    parser.add_argument(
+        "-d", type=Path, required=True, help="path to the destination result"
+    )
+    parser.add_argument("-n", type=int, required=True, help="index of the filelist")
+    args = parser.parse_args()
+
+    # get the two parameters
+    srcdir = args.s
+    dstdir = args.d
+    index = args.n
+
+    # load the list of files to process from the destination folder
+    filelistname = dstdir / "filelist.csv"
+    print("File list :", filelistname)
+    filelist = pd.read_csv(filelistname)
+
+    filename = Path(filelist.loc[index])
+    name = filename.stem
+    img, cell_mask, cell_trj, diff, flow, rho, div, blob_labels, blobs_trj = process(
+        srcdir / name
+    )
+    results_path = dstdir / name + "h5"
+
+    save_result(
+        results_path,
+        name,
+        img,
+        cell_mask,
+        cell_trj,
+        diff,
+        flow,
+        rho,
+        div,
+        blob_labels,
+        blobs_trj,
+    )
+
+    df = record(
+        filename, img, cell_mask, cell_trj, diff, flow, rho, div, blob_labels, blobs_trj
+    )
+
+    df.to_csv()
