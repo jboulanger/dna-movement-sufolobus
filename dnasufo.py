@@ -497,29 +497,33 @@ def save_result(
     blob_trj.to_hdf(filename, key=f"{sname}/blob_trj", mode="a")
 
 
-def inspect_result(filename):
+def inspect_result(dst):
     """Inspect the content of the result file
 
     Parameter
     ---------
-    filename: str | Path
-        Path to the result HDF5 file
+    dst: str | Path
+        Path to the result folder
 
     Returns
     -------
-    HDF5 groups names corresponding to the processed items
+    Indices of the processed items
     """
-    groups = None
-    with h5py.File(filename, "r") as f:
-        groups = [k for k in f]
-        # for k1 in f:
-        #     for k2 in f[k1]:
-        #         print(k2)
-    return groups
+
+    filelist = pd.read_csv(dst / "filelist.csv")
+
+    return [
+        row.name
+        for row in filelist["name"]
+        if Path(dst / f"{row.name:06d}.h5").exists()
+    ]
 
 
-def load_result(filename: str, name: str):
+def load_result(folder: str, index: int):
     """Load the result from a HDF5 file"""
+    folder = Path(folder)
+    filename = folder / f"{index:06d}.h5"
+    name = pd.read_csv(folder / "filelist.csv").iloc["name"][index]
     with h5py.File(filename, "r") as f:
         img = np.array(f[name]["img"]).copy()
         cell_mask = np.array(f[name]["cell_mask"]).copy()
@@ -530,11 +534,21 @@ def load_result(filename: str, name: str):
         blob_labels = np.array(f[name]["blob_labels"]).copy()
     blob_trj = pd.read_hdf(filename, f"{name}/blob_trj")
     cell_trj = pd.read_hdf(filename, f"{name}/cell_trj")
-    return img, cell_mask, cell_trj, diff, flow, rho, div, blob_labels, blob_trj
+    return name, img, cell_mask, cell_trj, diff, flow, rho, div, blob_labels, blob_trj
 
 
 def record(
-    filename, img, cell_mask, cell_trj, diff, flow, rho, div, blob_labels, blob_trj
+    index,
+    filename,
+    img,
+    cell_mask,
+    cell_trj,
+    diff,
+    flow,
+    rho,
+    div,
+    blob_labels,
+    blob_trj,
 ):
     """Record the results in a dataframe"""
 
@@ -545,6 +559,7 @@ def record(
             mask_area = np.sum(cell_mask[frame])
             df.append(
                 {
+                    "index": index,
                     "filename": filename,
                     "frame": frame,
                     "cell-x": row["centroid-1"],
@@ -589,17 +604,18 @@ def split_frame(df):
     return frame
 
 
-def figure(filename, name, frame=0):
+def figure(folder: Path, index: int, frame=0):
     """Create a figure with graphs over time
     The figure has xx columns
     """
 
-    img, cell_mask, cell_trj, diff, flow, rho, div, blob_labels, blob_trj = load_result(
-        filename, name
+    name, img, cell_mask, cell_trj, diff, flow, rho, div, blob_labels, blob_trj = (
+        load_result(folder, index)
     )
 
     df = record(
-        filename,
+        index,
+        name,
         img,
         cell_mask,
         cell_trj,
@@ -672,14 +688,14 @@ def vec2rgb(x):
 
 def strip(
     filename,
-    name,
+    index,
     colormap="Greys",
     selection=None,
     quiver=False,
 ):
     """Create a strip"""
-    img, cell_mask, cell_trj, diff, flow, rho, div, blob_labels, blob_trj = load_result(
-        filename, name
+    name, img, cell_mask, cell_trj, diff, flow, rho, div, blob_labels, blob_trj = (
+        load_result(filename, index)
     )
     s = 2
     x, y = np.meshgrid(
@@ -808,7 +824,7 @@ def make_vector(data, step=2):
     )
 
 
-def list_files(root: Path, dst:Path):
+def list_files(root: Path, dst: Path):
     """List the files in the source folders and add them to a csv file
 
     Parameters
@@ -825,20 +841,20 @@ def list_files(root: Path, dst:Path):
 
     dst.mkdir(exist_ok=True)
 
-    filelist =  pd.DataFrame.from_records( [
-        {'path':x.relative_to(root),
-        'name':x.name,
-        'condition':'unknown'}
-        for x in root.rglob('Crop*/[!.]*.tif')
-        ])
+    filelist = pd.DataFrame.from_records(
+        [
+            {"path": x.relative_to(root), "name": x.stem, "condition": "unknown"}
+            for x in root.rglob("Crop*/[!.]*.tif")
+        ]
+    )
 
     print(f"Number of files {len(filelist)}")
-    opath = dst / 'filelist.csv'
+    opath = dst / "filelist.csv"
     filelist.to_csv(opath)
     return filelist
 
 
-def process_file(root:Path, dst:Path, index:int):
+def process_file(root: Path, dst: Path, index: int):
     """Process a single item from the filelist.csv stored in the dest folder
 
     Parameters
@@ -850,11 +866,11 @@ def process_file(root:Path, dst:Path, index:int):
 
     """
 
-    filelist = pd.read_csv(dst / 'filelist.csv')
+    filelist = pd.read_csv(dst / "filelist.csv")
     filename = Path(filelist["path"].iloc[index])
     name = filename.stem
     ipath = root / filename
-    
+
     if not ipath.exists():
         print(f"filepath '{ipath}' does not exist")
         exit(1)
@@ -865,13 +881,13 @@ def process_file(root:Path, dst:Path, index:int):
         ipath
     )
 
-    opath = dst / (name + ".h5")
-    print(f"Saving h5 {opath}")
-    if opath.exists():
-        opath.unlink()
+    h5_path = dst / f"{index:06d}.h5"
+    print(f"Saving h5 {h5_path}")
+    if h5_path.exists():
+        h5_path.unlink()
 
     save_result(
-        opath,
+        h5_path,
         name,
         img,
         cell_mask,
@@ -887,8 +903,8 @@ def process_file(root:Path, dst:Path, index:int):
     df = record(
         filename, img, cell_mask, cell_trj, diff, flow, rho, div, blob_labels, blobs_trj
     )
-    
-    csv_path = dst / (name + ".csv")
+
+    csv_path = dst / f"{index:06d}.csv"
     print(f"Saving csv file {csv_path}")
     df.to_csv(csv_path)
 
@@ -897,9 +913,11 @@ def _process_file(args):
     """Process file as a command line"""
     process_file(Path(args.root), Path(args.dst), args.index)
 
+
 def _list_files(args):
     """List files as a command line"""
     list_files(Path(args.root), Path(args.dst))
+
 
 if __name__ == "__main__":
     import argparse
@@ -908,20 +926,24 @@ if __name__ == "__main__":
     subparsers = parser.add_subparsers()
 
     subparser_list = subparsers.add_parser("list")
-    subparser_list.add_argument("--root", type=Path, required=False, help="path to the source data")
     subparser_list.add_argument(
-            "--dst", type=Path, required=True, help="path to the destination result"
-        )
+        "--root", type=Path, required=False, help="path to the source data"
+    )
+    subparser_list.add_argument(
+        "--dst", type=Path, required=True, help="path to the destination result"
+    )
     subparser_list.set_defaults(func=_list_files)
 
-
     subparser_process = subparsers.add_parser("process")
-    subparser_process.add_argument("--root", type=Path, required=False, help="root source data")
     subparser_process.add_argument(
-            "--dst", type=Path, required=True, help="path to the destination result"
-        )
-    subparser_process.add_argument("--index", type=int, required=True, help="index of the filelist")
+        "--root", type=Path, required=False, help="root source data"
+    )
+    subparser_process.add_argument(
+        "--dst", type=Path, required=True, help="path to the destination result"
+    )
+    subparser_process.add_argument(
+        "--index", type=int, required=True, help="index of the filelist"
+    )
     subparser_process.set_defaults(func=_process_file)
     args = parser.parse_args()
     args.func(args)
-    
