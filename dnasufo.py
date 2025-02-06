@@ -480,21 +480,21 @@ def save_result(
         mask of the segmented DNA blobs
     blob_trj: pd.dataframe
     """
-    sname = Path(name).stem
+    
 
     with h5py.File(filename, "a") as f:
-        f.create_group(sname)
-        f.create_dataset(f"{sname}/img", data=img)
-        f.create_dataset(f"{sname}/cell_mask", data=cell_mask)
-        f.create_dataset(f"{sname}/diff", data=diff)
-        f.create_dataset(f"{sname}/flow", data=flow)
-        f.create_dataset(f"{sname}/rho", data=rho)
-        f.create_dataset(f"{sname}/div", data=div)
-        f.create_dataset(f"{sname}/blob_labels", data=blob_labels)
+        f.create_group(name)
+        f.create_dataset(f"{name}/img", data=img)
+        f.create_dataset(f"{name}/cell_mask", data=cell_mask)
+        f.create_dataset(f"{name}/diff", data=diff)
+        f.create_dataset(f"{name}/flow", data=flow)
+        f.create_dataset(f"{name}/rho", data=rho)
+        f.create_dataset(f"{name}/div", data=div)
+        f.create_dataset(f"{name}/blob_labels", data=blob_labels)
 
     # cell_trj and blob_trj are dataframes. Use panda to save them in the file
-    cell_trj.to_hdf(filename, key=f"{sname}/cell_trj", mode="a")
-    blob_trj.to_hdf(filename, key=f"{sname}/blob_trj", mode="a")
+    cell_trj.to_hdf(filename, key=f"{name}/cell_trj", mode="a")
+    blob_trj.to_hdf(filename, key=f"{name}/blob_trj", mode="a")
 
 
 def inspect_result(filename):
@@ -852,7 +852,6 @@ def process_file(root:Path, dst:Path, index:int):
 
     filelist = pd.read_csv(dst / 'filelist.csv')
     filename = Path(filelist["path"].iloc[index])
-    name = filename.stem
     ipath = root / filename
     
     if not ipath.exists():
@@ -865,14 +864,14 @@ def process_file(root:Path, dst:Path, index:int):
         ipath
     )
 
-    opath = dst / (name + ".h5")
+    opath = dst / f"{index:06d}.h5"
     print(f"Saving h5 {opath}")
     if opath.exists():
         opath.unlink()
 
     save_result(
         opath,
-        name,
+        filename.stem,
         img,
         cell_mask,
         cell_trj,
@@ -888,7 +887,7 @@ def process_file(root:Path, dst:Path, index:int):
         filename, img, cell_mask, cell_trj, diff, flow, rho, div, blob_labels, blobs_trj
     )
     
-    csv_path = dst / (name + ".csv")
+    csv_path = dst / f"{index:06d}.csv"
     print(f"Saving csv file {csv_path}")
     df.to_csv(csv_path)
 
