@@ -37,8 +37,17 @@ conda create -f environment.yml
 
 
 ## Usage
+
+### Using a notebook
 - 1_List_files.ipynb: list files and store the list into filelist.csv
 - 2_Process.ipynb: measure motion in TIF files and save results in a h5 file
 - 2_Visualization.ipynb: visualize the results saved in the h5 file.
     
+### Using the command line
 
+```bash
+python dnasufo.py list --root $ROOTDIR --dst $DSTDIR
+```
+```bash
+python dnasufo.py process --root $ROOTDIR --dst $DSTDIR --index 0
+```

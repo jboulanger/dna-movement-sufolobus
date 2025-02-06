@@ -1,16 +1,19 @@
-name: dna-sufo
+name: dnasufo
 channels:
   - conda-forge
   - pytorch
+  - nvidia
 dependencies:
   - python
-  - pytorch
+  - pytorch-cuda=12.4
+  - torchvision
   - pip
-  - skimage
+  - scikit-image
   - matplotlib
   - pandas
   - pytables
+  - h5py
+  - tifffile
   - pip:
     - cellpose
     - trackpy
-    - gitpython

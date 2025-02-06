@@ -808,37 +808,70 @@ def make_vector(data, step=2):
     )
 
 
-if __name__ == "__main__":
-    import argparse
+def list_files(root: Path, dst:Path):
+    """List the files in the source folders and add them to a csv file
 
-    parser = argparse.ArgumentParser("dna-sufolobus")
-    parser.add_argument("-s", type=Path, required=False, help="path to the source data")
-    parser.add_argument(
-        "-d", type=Path, required=True, help="path to the destination result"
-    )
-    parser.add_argument("-n", type=int, required=True, help="index of the filelist")
-    args = parser.parse_args()
+    Parameters
+    ----------
+    root: Path
+        root of the path to the files
+    dst: Path
+        path to the result folfer
 
-    # get the two parameters
-    srcdir = args.s
-    dstdir = args.d
-    index = args.n
+    Returns
+    -------
+    list of files
+    """
 
-    # load the list of files to process from the destination folder
-    filelistname = dstdir / "filelist.csv"
-    print("File list :", filelistname)
-    filelist = pd.read_csv(filelistname)
+    dst.mkdir(exist_ok=True)
+
+    filelist =  pd.DataFrame.from_records( [
+        {'path':x.relative_to(root),
+        'name':x.name,
+        'condition':'unknown'}
+        for x in root.rglob('Crop*/[!.]*.tif')
+        ])
+
+    print(f"Number of files {len(filelist)}")
+    opath = dst / 'filelist.csv'
+    filelist.to_csv(opath)
+    return filelist
+
+
+def process_file(root:Path, dst:Path, index:int):
+    """Process a single item from the filelist.csv stored in the dest folder
+
+    Parameters
+    ----------
+    root: Path
+        root of the path to the files
+    dst: Path
+        path to the result folfer
+
+    """
+
+    filelist = pd.read_csv(dst / 'filelist.csv')
     filename = Path(filelist["path"].iloc[index])
     name = filename.stem
-    print(filename)
+    ipath = root / filename
+    
+    if not ipath.exists():
+        print(f"filepath '{ipath}' does not exist")
+        exit(1)
+    else:
+        print(f"filepath '{ipath}'")
+
     img, cell_mask, cell_trj, diff, flow, rho, div, blob_labels, blobs_trj = process(
-        srcdir / filename
+        ipath
     )
 
-    results_path = dstdir / (name + ".h5")
-    print(f"Saving {results_path}")
+    opath = dst / (name + ".h5")
+    print(f"Saving h5 {opath}")
+    if opath.exists():
+        opath.unlink()
+
     save_result(
-        results_path,
+        opath,
         name,
         img,
         cell_mask,
@@ -854,6 +887,41 @@ if __name__ == "__main__":
     df = record(
         filename, img, cell_mask, cell_trj, diff, flow, rho, div, blob_labels, blobs_trj
     )
-    csv_path = dstdir / (name + ".csv")
-    print(f"Saving {csv_path}")
+    
+    csv_path = dst / (name + ".csv")
+    print(f"Saving csv file {csv_path}")
     df.to_csv(csv_path)
+
+
+def _process_file(args):
+    """Process file as a command line"""
+    process_file(Path(args.root), Path(args.dst), args.index)
+
+def _list_files(args):
+    """List files as a command line"""
+    list_files(Path(args.root), Path(args.dst))
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser("dna-sufolobus")
+    subparsers = parser.add_subparsers()
+
+    subparser_list = subparsers.add_parser("list")
+    subparser_list.add_argument("--root", type=Path, required=False, help="path to the source data")
+    subparser_list.add_argument(
+            "--dst", type=Path, required=True, help="path to the destination result"
+        )
+    subparser_list.set_defaults(func=_list_files)
+
+
+    subparser_process = subparsers.add_parser("process")
+    subparser_process.add_argument("--root", type=Path, required=False, help="root source data")
+    subparser_process.add_argument(
+            "--dst", type=Path, required=True, help="path to the destination result"
+        )
+    subparser_process.add_argument("--index", type=int, required=True, help="index of the filelist")
+    subparser_process.set_defaults(func=_process_file)
+    args = parser.parse_args()
+    args.func(args)
+    
