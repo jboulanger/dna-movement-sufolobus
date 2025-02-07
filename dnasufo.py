@@ -992,7 +992,17 @@ def process_file(root: Path, dst: Path, index: int):
 
     # export data as csv
     df = record(
-        filename, img, cell_mask, cell_trj, diff, flow, rho, div, blob_labels, blob_trj
+        index,
+        filename,
+        img,
+        cell_mask,
+        cell_trj,
+        diff,
+        flow,
+        rho,
+        div,
+        blob_labels,
+        blob_trj,
     )
     csv_path = dst / f"{index:06d}.csv"
     print(f"Saving csv file {csv_path}")
