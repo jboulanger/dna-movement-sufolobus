@@ -512,9 +512,7 @@ def inspect_result(dst):
     filelist = pd.read_csv(dst / "filelist.csv")
 
     return [
-        row.name
-        for row in filelist["name"]
-        if Path(dst / f"{row.name:06d}.h5").exists()
+        row.name for row in filelist.iloc if Path(dst / f"{row.name:06d}.h5").exists()
     ]
 
 
@@ -522,7 +520,8 @@ def load_result(folder: str, index: int):
     """Load the result from a HDF5 file"""
     folder = Path(folder)
     filename = folder / f"{index:06d}.h5"
-    name = pd.read_csv(folder / "filelist.csv").iloc["name"][index]
+    filelist = pd.read_csv(folder / "filelist.csv")
+    name = filelist["name"].iloc[index]
     with h5py.File(filename, "r") as f:
         img = np.array(f[name]["img"]).copy()
         cell_mask = np.array(f[name]["cell_mask"]).copy()
@@ -595,6 +594,7 @@ def record(
 
 
 def split_frame(df):
+    """Detect the splitting time and return the frame index"""
     k = np.where(np.array(df["cell-area"]) < df["cell-area"].mean())[0]
     if len(k) > 0:
         frame = df["frame"].iloc[k[0]].item()
@@ -603,14 +603,24 @@ def split_frame(df):
     return frame
 
 
-def figure(folder: Path, index: int, frame=0):
+def create_figure(
+    index,
+    name,
+    img,
+    cell_mask,
+    cell_trj,
+    diff,
+    flow,
+    rho,
+    div,
+    blob_labels,
+    blob_trj,
+    frame=0,
+):
     """Create a figure with graphs over time
-    The figure has xx columns
-    """
 
-    name, img, cell_mask, cell_trj, diff, flow, rho, div, blob_labels, blob_trj = (
-        load_result(folder, index)
-    )
+    The figure has 3 rows and 4 columns
+    """
 
     df = record(
         index,
@@ -629,7 +639,7 @@ def figure(folder: Path, index: int, frame=0):
     if frame == "auto":
         frame = split_frame(df)
 
-    cols = df.columns[5:-2]
+    cols = df.columns[6:-2]
 
     fig, ax = plt.subplots(3, (len(cols) + 1) // 3, figsize=(12, 9))
     ax = ax.ravel()
@@ -660,6 +670,40 @@ def figure(folder: Path, index: int, frame=0):
             ax[k + 1].set(box_aspect=1, title=col)
 
     fig.set_tight_layout(True)
+    plt.suptitle(name)
+
+
+def figure(folder: Path, index: int, frame=0):
+    """Create a figure with graphs over time
+
+    The figure has 3 row and 4 columns
+
+    Parameters
+    ----------
+    folder: Path
+        result folder
+    index : int
+        index of the file
+    frame: int | str
+        frame index or "auto"
+
+    """
+    name, img, cell_mask, cell_trj, diff, flow, rho, div, blob_labels, blob_trj = (
+        load_result(folder, index)
+    )
+    create_figure(
+        index,
+        name,
+        img,
+        cell_mask,
+        cell_trj,
+        diff,
+        flow,
+        rho,
+        div,
+        blob_labels,
+        blob_trj,
+    )
 
 
 def vec2rgb(x):
@@ -685,17 +729,19 @@ def vec2rgb(x):
     )
 
 
-def strip(
-    filename,
-    index,
+def create_strip(
+    name,
+    img,
+    cell_mask,
+    diff,
+    flow,
+    rho,
+    div,
+    blob_labels,
     colormap="Greys",
     selection=None,
     quiver=False,
 ):
-    """Create a strip"""
-    name, img, cell_mask, cell_trj, diff, flow, rho, div, blob_labels, blob_trj = (
-        load_result(filename, index)
-    )
     s = 2
     x, y = np.meshgrid(
         *[np.arange(0, n, s) for n in [img.shape[2], img.shape[3]]], indexing="xy"
@@ -710,7 +756,7 @@ def strip(
     fig, ax = plt.subplots(5, len(indices), figsize=(len(indices), 5))
     dmax = (np.abs(diff) * cell_mask[:-1]).max() / 2
     vmax = (np.linalg.norm(flow, axis=1)).max() / 2
-    rmax = (np.linalg.norm(rho, axis=1)).max() / 2
+    # rmax = (np.linalg.norm(rho, axis=1)).max() / 2
     drmax = (np.abs(div) * cell_mask[:-1]).max() / 2
     for k, n in enumerate(indices):
         if n >= img.shape[0]:
@@ -796,8 +842,48 @@ def strip(
     plt.subplots_adjust(wspace=0, hspace=0)
 
 
-def make_vector(data, step=2):
-    """Create a vector array for napari visualization"""
+def strip(
+    filename,
+    index,
+    colormap="Greys",
+    selection=None,
+    quiver=False,
+):
+    """Create a strip illustration with vignette etc"""
+
+    name, img, cell_mask, _, diff, flow, rho, div, blob_labels, _ = load_result(
+        filename, index
+    )
+    create_strip(
+        name,
+        img,
+        cell_mask,
+        diff,
+        flow,
+        rho,
+        div,
+        blob_labels,
+        colormap,
+        selection,
+        quiver,
+    )
+
+
+def make_vector(data, step: int = 2):
+    """Create a vector array for napari visualization
+
+    Parameters
+    ----------
+    data: np.ndarray
+        input array [T,2,W,D]
+    step: int
+        sub sampling
+
+    Returns
+    -------
+    Array
+
+    """
     step = 2
     x, y = np.meshgrid(
         *[np.arange(0, n, step) for n in [data.shape[2], data.shape[3]]], indexing="xy"
@@ -861,9 +947,13 @@ def process_file(root: Path, dst: Path, index: int):
     root: Path
         root of the path to the files
     dst: Path
-        path to the result folfer
+        path to the result folder containing a `filelist.csv`
 
     """
+
+    # Determine the file name from the list of files in the dst folder
+    if not (dst / "filelist.csv").exists():
+        raise (f"The folder {dst} has no filelist.csv. Run the 'list' command first.")
 
     filelist = pd.read_csv(dst / "filelist.csv")
     filename = Path(filelist["path"].iloc[index])
@@ -875,10 +965,12 @@ def process_file(root: Path, dst: Path, index: int):
     else:
         print(f"filepath '{ipath}'")
 
-    img, cell_mask, cell_trj, diff, flow, rho, div, blob_labels, blobs_trj = process(
+    # process the file
+    img, cell_mask, cell_trj, diff, flow, rho, div, blob_labels, blob_trj = process(
         ipath
     )
 
+    # Save the results as a hdf5 file
     h5_path = dst / f"{index:06d}.h5"
     print(f"Saving h5 {h5_path}")
     if h5_path.exists():
@@ -895,16 +987,51 @@ def process_file(root: Path, dst: Path, index: int):
         rho,
         div,
         blob_labels,
-        blobs_trj,
+        blob_trj,
     )
 
+    # export data as csv
     df = record(
-        filename, img, cell_mask, cell_trj, diff, flow, rho, div, blob_labels, blobs_trj
+        filename, img, cell_mask, cell_trj, diff, flow, rho, div, blob_labels, blob_trj
     )
-
     csv_path = dst / f"{index:06d}.csv"
     print(f"Saving csv file {csv_path}")
     df.to_csv(csv_path)
+
+    # create a strip visualization
+    strip_path = dst / f"{index:06d}-strip.jpg"
+    create_strip(
+        filename.stem,
+        img,
+        cell_mask,
+        diff,
+        flow,
+        rho,
+        div,
+        blob_labels,
+        "Greys",
+        selection=slice(0, 200, 20),
+        quiver=False,
+    )
+    plt.savefig(strip_path)
+
+    # create a figure with intensities over time
+    fig_path = dst / f"{index:06d}-figure.jpg"
+    create_figure(
+        index,
+        filename.name,
+        img,
+        cell_mask,
+        cell_trj,
+        diff,
+        flow,
+        rho,
+        div,
+        blob_labels,
+        blob_trj,
+        frame="auto",
+    )
+    plt.savefig(fig_path)
 
 
 def _process_file(args):

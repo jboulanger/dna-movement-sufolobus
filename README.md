@@ -20,9 +20,18 @@ Several motion metrics are reported:
 │   ├── result.csv
 │   └── result.h5
 └── source
-    ├── img001.tif
-    ├── img002.tif
-    └── img003.tif
+    ├── Condition1
+    │    ├── Crop
+    │    │    ├── img001.tif
+    │    │    ├── img002.tif
+    │    │    └── img003.tif
+    |    └── data.tif 
+    └── Condition2
+         ├── Crop
+         │    ├── img001.tif
+         │    ├── img002.tif
+         │    └── img003.tif
+         └── data.tif 
 ```
 
 ## Installation
@@ -30,13 +39,13 @@ Clone the repository using :
 ```bash
 git clone
 ```
-Create an environment using:
+Create an conda/mamba/micromamba environment using:
 ```bash
 conda create -f environment.yml
 ```
 
-
 ## Usage
+The analysis can be run in notebooks or using a command line.
 
 ### Using a notebook
 - 1_List_files.ipynb: list files and store the list into filelist.csv
@@ -44,10 +53,15 @@ conda create -f environment.yml
 - 2_Visualization.ipynb: visualize the results saved in the h5 file.
     
 ### Using the command line
-
+- List all files at the `ROOTDIR` folder in the `Crop` subfolders.
 ```bash
 python dnasufo.py list --root $ROOTDIR --dst $DSTDIR
 ```
+- Process first of the listed files
 ```bash
 python dnasufo.py process --root $ROOTDIR --dst $DSTDIR --index 0
+```
+- Use a slurm script to process all files on a HPC:
+```bash
+sbatch -a 0-239 run.sh
 ```
