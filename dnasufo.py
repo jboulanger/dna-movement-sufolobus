@@ -32,10 +32,10 @@ def segment_watershed(mask: np.ndarray, r: float = 5.0):
     return labels.astype(np.uint32)
 
 
-def preprocess(img: np.ndarray, background: float):
+def preprocess(img: np.ndarray, background: float, scale=[1, 0, 0.85, 0.85]):
     """Preprocess the image sequence with a gaussian blur"""
     return np.maximum(
-        ndi.gaussian_filter(img.astype(float) - background, [3, 0, 1, 1]),
+        ndi.gaussian_filter(img.astype(float) - background, scale),
         0,
     )
 
@@ -207,7 +207,7 @@ def segment_and_track_cell(img: np.ndarray, model=None):
 
     # track the cells with trackpy
     tp.quiet()
-    trj = tp.link(df, search_range=20, pos_columns=["centroid-0", "centroid-1"])
+    trj = tp.link(df, search_range=40, pos_columns=["centroid-0", "centroid-1"])
 
     # Keep the cell the most at the center at frame 0
     cell_to_keep = np.argmin(trj[trj["frame"] == 0]["distance_to_center"])
@@ -217,7 +217,7 @@ def segment_and_track_cell(img: np.ndarray, model=None):
     # trj = link(df, center)
 
     # set the labels as the track id
-    tracked_labels = np.zeros(labels.shape)
+    tracked_labels = np.zeros(labels.shape, dtype=np.uint8)
     for row in trj.iloc:
         idx = labels[int(row["frame"])] == row["label"]
         tracked_labels[int(row["frame"])][idx] = 1
@@ -289,7 +289,7 @@ def segment_and_track_dna_blobs(img, mask):
     trj["particle"] = trj["particle"].apply(lambda x: tmap[x])
 
     # map the labels to the tracked labels
-    labels = np.zeros(blob.shape)
+    labels = np.zeros(blob.shape, dtype=np.uint8)
     for row in trj.iloc:
         idx = blob[int(row["frame"])] == row["label"]
         labels[int(row["frame"])][idx] = int(row["particle"])
@@ -397,7 +397,7 @@ def sum_intensity(mask, image):
     return [np.sum((mask == level) * image) for level in np.unique(mask) if level > 0]
 
 
-def process(filename: str):
+def process(filename: str, channels=[0, 1]):
     """Process the file
 
     Parameters
@@ -407,6 +407,20 @@ def process(filename: str):
 
     Returns
     -------
+    img: np.ndarray
+        image as [L,C,H,W]
+    cell_lbl: np.ndarray
+        cell segmentation masks [L,1,H,W]
+    cell_trj: pd.DataFrame
+        cell tracks
+    cell_flow: np.ndarray
+        estimated optical flow [L,2,H,W]
+    dna_lbl: np.ndarray
+
+    dna_trj: np.ndarray
+    dna_flow : np.ndarray
+        estimated optical flow [L,2,H,W]
+
     img: np.ndarray
         original image as [L,C,H,W]
     mask: np.ndarray
@@ -424,33 +438,34 @@ def process(filename: str):
     div: np.ndarray
         divergence of the momentum (div(rho.v))[L,1,H,W]
 
+    Note
+    ----
+    pimg, cell_lbl, cell_trj, cell_flow, dna_lbl, dna_trj, dna_flow = process(filename)
     """
 
     img = tifffile.imread(filename)
-    print(img.shape)
     pimg = preprocess(img, 100)
-    cell_mask, cell_trj = segment_and_track_cell(pimg)
-    diff = frame_differences(pimg[:, 1])
-    flow_cells = compute_flow(pimg[:, 0], 10)
-    flow = compute_flow(pimg[:, 1]) - flow_cells
-    rho = momentum(pimg[:-1, 1], flow)
-    div = divergence(rho)
-    blob_labels, blobs_trj = segment_and_track_dna_blobs(pimg[:, 1], cell_mask)
-    return img, cell_mask, cell_trj, diff, flow, rho, div, blob_labels, blobs_trj
+    pimg2 = preprocess(img, 100, scale=[3, 0, 2, 2])
+    cell_lbl, cell_trj = segment_and_track_cell(pimg2)
+    # dna_diff = frame_differences(pimg[:, 1])
+    cell_flow = compute_flow(pimg[:, channels[0]], 20)
+    dna_flow = compute_flow(pimg[:, channels[1]], 2)
+    # rho = momentum(pimg[:-1, 1], dna_flow)
+    # div = divergence(rho)
+    dna_lbl, dna_trj = segment_and_track_dna_blobs(pimg2[:, 1], cell_lbl)
+    return pimg, cell_lbl, cell_trj, cell_flow, dna_lbl, dna_trj, dna_flow
 
 
 def save_result(
     filename: str,
     name: str,
     img: np.ndarray,
-    cell_mask: np.ndarray,
+    cell_lbl: np.ndarray,
     cell_trj: np.ndarray,
-    diff: np.ndarray,
-    flow: np.ndarray,
-    rho: np.ndarray,
-    div: np.ndarray,
-    blob_labels: np.ndarray,
-    blob_trj: np.ndarray,
+    cell_flow: np.ndarray,
+    dna_lbl: np.ndarray,
+    dna_trj: np.ndarray,
+    dna_flow: np.ndarray,
 ):
     """Save results to a hdf5 file
 
@@ -462,38 +477,31 @@ def save_result(
         name of the group / id
     img: np.ndarray
         original image as [L,C,H,W]
-    cell_mask: np.ndarray
+    cell_lbl: np.ndarray
         segmentation masks [L,1,H,W]
     cell_trj: pd.dataframe
         positions of the cell of time [L,2]
-    speed: np.ndarray
-        speed of the cell of time [L,2]
-    diff: np.ndarray
-        frame difference [L,1,H,W]
-    flow: np.ndarray
-        estimated optical flow corrected from the cell speed [L,2,H,W]
-    rho: np.ndarray
-        momentum rho.v [L,2,H,W]
-    div: np.ndarray
-        divergence of the momentum (div(rho.v))[L,1,H,W]
-    blob_labels: np.ndarray
-        mask of the segmented DNA blobs
-    blob_trj: pd.dataframe
+    cell_flow:
+        estimated optical flow on the cell [L,2,H,W]
+    dna_lbl: np.ndarray
+        segmentation masks [L,1,H,W]
+    dna_trj: pd.dataframe
+        positions of the cell of time [L,2]
+    dna_flow:
+        estimated optical flow on the cell [L,2,H,W]
     """
 
-    with h5py.File(filename, "a") as f:
+    with h5py.File(filename, "w") as f:
         f.create_group(name)
         f.create_dataset(f"{name}/img", data=img)
-        f.create_dataset(f"{name}/cell_mask", data=cell_mask)
-        f.create_dataset(f"{name}/diff", data=diff)
-        f.create_dataset(f"{name}/flow", data=flow)
-        f.create_dataset(f"{name}/rho", data=rho)
-        f.create_dataset(f"{name}/div", data=div)
-        f.create_dataset(f"{name}/blob_labels", data=blob_labels)
+        f.create_dataset(f"{name}/cell_lbl", data=cell_lbl)
+        f.create_dataset(f"{name}/cell_flow", data=cell_flow)
+        f.create_dataset(f"{name}/dna_lbl", data=dna_lbl)
+        f.create_dataset(f"{name}/dna_flow", data=dna_flow)
 
     # cell_trj and blob_trj are dataframes. Use panda to save them in the file
     cell_trj.to_hdf(filename, key=f"{name}/cell_trj", mode="a")
-    blob_trj.to_hdf(filename, key=f"{name}/blob_trj", mode="a")
+    dna_trj.to_hdf(filename, key=f"{name}/dna_trj", mode="a")
 
 
 def inspect_result(dst):
@@ -523,38 +531,30 @@ def load_result(folder: str, index: int):
     filelist = pd.read_csv(folder / "filelist.csv")
     name = filelist["name"].iloc[index]
     with h5py.File(filename, "r") as f:
-        img = np.array(f[name]["img"]).copy()
-        cell_mask = np.array(f[name]["cell_mask"]).copy()
-        diff = np.array(f[name]["diff"]).copy()
-        flow = np.array(f[name]["flow"]).copy()
-        rho = np.array(f[name]["rho"]).copy()
-        div = np.array(f[name]["div"]).copy()
-        blob_labels = np.array(f[name]["blob_labels"]).copy()
-    blob_trj = pd.read_hdf(filename, f"{name}/blob_trj")
+        pimg = np.array(f[name]["img"]).copy()
+        cell_lbl = np.array(f[name]["cell_lbl"]).copy()
+        cell_flow = np.array(f[name]["cell_flow"]).copy()
+        dna_lbl = np.array(f[name]["dna_lbl"]).copy()
+        dna_flow = np.array(f[name]["dna_flow"]).copy()
+
+    dna_trj = pd.read_hdf(filename, f"{name}/dna_trj")
     cell_trj = pd.read_hdf(filename, f"{name}/cell_trj")
-    return name, img, cell_mask, cell_trj, diff, flow, rho, div, blob_labels, blob_trj
+
+    return name, pimg, cell_lbl, cell_trj, cell_flow, dna_lbl, dna_trj, dna_flow
 
 
 def record(
-    index,
-    filename,
-    img,
-    cell_mask,
-    cell_trj,
-    diff,
-    flow,
-    rho,
-    div,
-    blob_labels,
-    blob_trj,
+    index, filename, pimg, cell_lbl, cell_trj, cell_flow, dna_lbl, dna_trj, dna_flow
 ):
     """Record the results in a dataframe"""
-
+    dna_diff = frame_differences(pimg[:, 1])
+    dna_rho = momentum(pimg[:-1, 1], dna_flow)
+    dna_div = divergence(dna_rho)
     df = []
     for row in cell_trj.iloc:
         frame = int(row["frame"])
-        if frame < img.shape[0] - 1:
-            mask_area = np.sum(cell_mask[frame])
+        if frame < pimg.shape[0] - 1:
+            mask_area = np.sum(cell_lbl[frame])
             df.append(
                 {
                     "index": index,
@@ -562,40 +562,52 @@ def record(
                     "frame": frame,
                     "cell-x": row["centroid-1"],
                     "cell-y": row["centroid-0"],
-                    "cell-area": mask_area,
-                    "frame difference": np.sum(np.abs(diff[frame]) * cell_mask[frame])
-                    / np.sum(cell_mask[frame]),
-                    "flow": np.sum(
-                        np.linalg.norm(flow[frame], axis=0) * cell_mask[frame]
+                    "cell area": mask_area,
+                    "cell flow": np.sum(
+                        np.linalg.norm(cell_flow[frame], axis=0) * cell_lbl[frame]
                     )
                     / mask_area,
-                    "momentum": np.sum(
-                        np.linalg.norm(rho[frame], axis=0) * cell_mask[frame]
+                    "dna frame difference": np.sum(
+                        np.abs(dna_diff[frame]) * cell_lbl[frame]
                     )
                     / mask_area,
-                    "divergence": np.sum(np.abs(div[frame]) * cell_mask[frame])
+                    "dna flow": np.sum(
+                        np.linalg.norm(dna_flow[frame], axis=0) * cell_lbl[frame]
+                    )
+                    / mask_area,
+                    "dna momentum": np.sum(
+                        np.linalg.norm(dna_rho[frame], axis=0) * cell_lbl[frame]
+                    )
+                    / mask_area,
+                    "dna divergence": np.sum(np.abs(dna_div[frame]) * cell_lbl[frame])
                     / mask_area,
                     "dna intensity mean": row["mean_intensity"],
                     "dna intensity spread": row["spread"],
                     "dna intensity skew": row["skew"],
-                    "dna blob count": len(blob_trj[blob_trj["frame"] == frame]),
-                    "dna blob area": np.sum(blob_labels[frame] > 0),
+                    "dna blob count": len(dna_trj[dna_trj["frame"] == frame]),
+                    "dna blob area": np.sum(dna_lbl[frame] > 0),
                     "dna blob 1 sum intensity": np.sum(
-                        img[frame, 1] * (blob_labels[frame] == 1)
+                        pimg[frame, 1] * (dna_lbl[frame] == 1)
                     ),
                     "dna blob 2 sum intensity": np.sum(
-                        img[frame, 1] * (blob_labels[frame] == 2)
+                        pimg[frame, 1] * (dna_lbl[frame] == 2)
                     ),
-                    "dna blob 1 area": np.sum(blob_labels[frame] == 1),
-                    "dna blob 2 area": np.sum(blob_labels[frame] == 2),
+                    "dna blob 1 area": np.sum(dna_lbl[frame] == 1),
+                    "dna blob 2 area": np.sum(dna_lbl[frame] == 2),
                 }
             )
     return pd.DataFrame.from_records(df)
 
 
 def split_frame(df):
-    """Detect the splitting time and return the frame index"""
-    k = np.where(np.array(df["cell-area"]) < df["cell-area"].mean())[0]
+    """Detect the splitting time and return the frame index
+
+    Parameters
+    ----------
+    df:pd.DataFrame
+
+    """
+    k = np.where(np.array(df["cell area"]) < 0.6 * df["cell area"].max())[0]
     if len(k) > 0:
         frame = df["frame"].iloc[k[0]].item()
     else:
@@ -606,15 +618,13 @@ def split_frame(df):
 def create_figure(
     index,
     name,
-    img,
-    cell_mask,
+    pimg,
+    cell_lbl,
     cell_trj,
-    diff,
-    flow,
-    rho,
-    div,
-    blob_labels,
-    blob_trj,
+    cell_flow,
+    dna_lbl,
+    dna_trj,
+    dna_flow,
     frame=0,
 ):
     """Create a figure with graphs over time
@@ -625,34 +635,32 @@ def create_figure(
     df = record(
         index,
         name,
-        img,
-        cell_mask,
+        pimg,
+        cell_lbl,
         cell_trj,
-        diff,
-        flow,
-        rho,
-        div,
-        blob_labels,
-        blob_trj,
+        cell_flow,
+        dna_lbl,
+        dna_trj,
+        dna_flow,
     )
 
     if frame == "auto":
         frame = split_frame(df)
 
-    cols = df.columns[6:-2]
+    cols = df.columns[5:]
 
-    fig, ax = plt.subplots(3, (len(cols) + 1) // 3, figsize=(12, 9))
+    fig, ax = plt.subplots(4, int(np.ceil((len(cols) + 1) / 4)), figsize=(12, 9))
     ax = ax.ravel()
 
-    ax[0].imshow(uv2rgb(img[frame]))
+    ax[0].imshow(uv2rgb(pimg[frame]))
     ax[0].set_axis_off()
     ax[0].set(title=f"frame:{frame}")
 
-    for c in measure.find_contours(cell_mask[frame, 0], 0.5):
+    for c in measure.find_contours(cell_lbl[frame, 0], 0.5):
         ax[0].plot(c[:, 1], c[:, 0], "w")
 
-    for level in range(1, int(blob_labels[frame].max() + 1)):
-        for c in measure.find_contours((blob_labels[frame] == level).astype(int), 0.5):
+    for level in range(1, int(dna_lbl[frame].max() + 1)):
+        for c in measure.find_contours((dna_lbl[frame] == level).astype(int), 0.5):
             ax[0].plot(c[:, 1], c[:, 0], "orange")
 
     ax[0].plot(df["cell-x"], df["cell-y"], "w", linewidth=1)
@@ -688,21 +696,27 @@ def figure(folder: Path, index: int, frame=0):
         frame index or "auto"
 
     """
-    name, img, cell_mask, cell_trj, diff, flow, rho, div, blob_labels, blob_trj = (
-        load_result(folder, index)
-    )
+    (
+        name,
+        pimg,
+        cell_lbl,
+        cell_trj,
+        cell_flow,
+        dna_lbl,
+        dna_trj,
+        dna_flow,
+    ) = load_result(folder, index)
+
     create_figure(
         index,
         name,
-        img,
-        cell_mask,
+        pimg,
+        cell_lbl,
         cell_trj,
-        diff,
-        flow,
-        rho,
-        div,
-        blob_labels,
-        blob_trj,
+        cell_flow,
+        dna_lbl,
+        dna_trj,
+        dna_flow,
     )
 
 
@@ -731,57 +745,61 @@ def vec2rgb(x):
 
 def create_strip(
     name,
-    img,
-    cell_mask,
-    diff,
-    flow,
-    rho,
-    div,
-    blob_labels,
+    pimg,
+    cell_lbl,
+    cell_trj,
+    cell_flow,
+    dna_lbl,
+    dna_trj,
+    dna_flow,
     colormap="Greys",
     selection=None,
     quiver=False,
 ):
+    """Create a strip visualization"""
+    dna_diff = frame_differences(pimg[:, 1])
+    dna_rho = momentum(pimg[:-1, 1], dna_flow)
+    dna_div = divergence(dna_rho)
     s = 2
     x, y = np.meshgrid(
-        *[np.arange(0, n, s) for n in [img.shape[2], img.shape[3]]], indexing="xy"
+        *[np.arange(0, n, s) for n in [pimg.shape[2], pimg.shape[3]]], indexing="xy"
     )
     X, Y = np.meshgrid(
-        *[np.arange(0, n) for n in [img.shape[2], img.shape[3]]], indexing="xy"
+        *[np.arange(0, n) for n in [pimg.shape[2], pimg.shape[3]]], indexing="xy"
     )
     if selection is None:
-        indices = np.arange(0, img.shape[0], 20)
+        indices = np.arange(0, pimg.shape[0], 20)
     else:
         indices = np.arange(selection.start, selection.stop, selection.step)
     fig, ax = plt.subplots(5, len(indices), figsize=(len(indices), 5))
-    dmax = (np.abs(diff) * cell_mask[:-1]).max() / 2
-    vmax = (np.linalg.norm(flow, axis=1)).max() / 2
+    dmax = (np.abs(dna_diff) * cell_lbl[:-1]).max() / 2
+    vmax = (np.linalg.norm(dna_flow, axis=1)).max() / 2
     # rmax = (np.linalg.norm(rho, axis=1)).max() / 2
-    drmax = (np.abs(div) * cell_mask[:-1]).max() / 2
+    drmax = (np.abs(dna_div) * cell_lbl[:-1]).max() / 2
     for k, n in enumerate(indices):
-        if n >= img.shape[0]:
+        if n >= pimg.shape[0]:
             break
-        ax[0, k].imshow(uv2rgb(img[n]))
+        ax[0, k].imshow(uv2rgb(pimg[n]))
         ax[0, k].set_axis_off()
-        for c in measure.find_contours(cell_mask[n, 0], 0.5):
+        for c in measure.find_contours(cell_lbl[n, 0], 0.5):
             ax[0, k].plot(c[:, 1], c[:, 0], "white", alpha=0.8)
-        for level in range(1, int(blob_labels[n].max() + 1)):
-            for c in measure.find_contours((blob_labels[n] == level).astype(int), 0.5):
+        for level in range(1, int(dna_lbl[n].max() + 1)):
+            for c in measure.find_contours((dna_lbl[n] == level).astype(int), 0.5):
                 ax[0, k].plot(c[:, 1], c[:, 0], "#FFA500", alpha=0.8)
         ax[0, k].set(title=f"{n}")
         ax[1, k].imshow(
-            (diff[n] * cell_mask[n]).squeeze(), vmin=-dmax, vmax=dmax, cmap=colormap
+            (dna_diff[n] * cell_lbl[n]).squeeze(), vmin=-dmax, vmax=dmax, cmap=colormap
         )
         ax[1, k].set_axis_off()
-        ax[1, 0].text(-10, img.shape[2] / 2, "diff", rotation=90)
+        ax[1, 0].text(-10, pimg.shape[2] / 2, "diff", rotation=90)
 
-        ax[2, k].imshow(vec2rgb(flow[n] / vmax))
+        ax[2, k].imshow(vec2rgb(dna_flow[n] / vmax))
         if quiver:
             ax[2, k].quiver(
                 x,
                 y,
-                flow[n, 1, ::s, ::s],
-                flow[n, 0, ::s, ::s],
+                dna_flow[n, 1, ::s, ::s],
+                dna_flow[n, 0, ::s, ::s],
                 color="k",
                 units="dots",
                 angles="xy",
@@ -792,26 +810,26 @@ def create_strip(
             ax[2, k].streamplot(
                 X,
                 Y,
-                flow[n, 1],
-                flow[n, 0],
+                dna_flow[n, 1],
+                dna_flow[n, 0],
                 density=1,
                 linewidth=0.5,
                 arrowsize=0.1,
                 color="k",
             )
         ax[2, k].set_axis_off()
-        ax[2, 0].text(-10, img.shape[2] / 2, "flow", rotation=90)
+        ax[2, 0].text(-10, pimg.shape[2] / 2, "flow", rotation=90)
 
         ax[3, k].imshow(
-            np.ones([img.shape[2], img.shape[3]]), cmap="gray", vmin=0, vmax=1
+            np.ones([pimg.shape[2], pimg.shape[3]]), cmap="gray", vmin=0, vmax=1
         )
-        ax[3, k].imshow(vec2rgb(rho[n]))
+        ax[3, k].imshow(vec2rgb(dna_rho[n]))
         if quiver:
             ax[4, k].quiver(
                 x,
                 y,
-                rho[n, 1, ::s, ::s],
-                rho[n, 0, ::s, ::s],
+                dna_rho[n, 1, ::s, ::s],
+                dna_rho[n, 0, ::s, ::s],
                 color="k",
                 units="dots",
                 angles="xy",
@@ -822,21 +840,21 @@ def create_strip(
             ax[3, k].streamplot(
                 X,
                 Y,
-                rho[n, 1],
-                rho[n, 0],
+                dna_rho[n, 1],
+                dna_rho[n, 0],
                 density=1,
                 linewidth=0.5,
                 arrowsize=0.1,
                 color="k",
             )
         ax[3, k].set_axis_off()
-        ax[3, 0].text(-10, img.shape[2] / 2, "mom", rotation=90)
+        ax[3, 0].text(-10, pimg.shape[2] / 2, "mom", rotation=90)
 
         ax[4, k].imshow(
-            (div[n] * cell_mask[n]).squeeze(), vmin=-drmax, vmax=drmax, cmap=colormap
+            (dna_div[n] * cell_lbl[n]).squeeze(), vmin=-drmax, vmax=drmax, cmap=colormap
         )
         ax[4, k].set_axis_off()
-        ax[4, 0].text(-10, img.shape[2] / 2, "div", rotation=90)
+        ax[4, 0].text(-10, pimg.shape[2] / 2, "div", rotation=90)
 
     fig.suptitle(Path(name).stem)
     plt.subplots_adjust(wspace=0, hspace=0)
