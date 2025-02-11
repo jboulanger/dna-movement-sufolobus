@@ -524,6 +524,16 @@ def inspect_result(dst):
     ]
 
 
+def check_h5(folder, index):
+    folder = Path(folder)
+    filename = folder / f"{index:06d}.h5"
+    filelist = pd.read_csv(folder / "filelist.csv")
+    name = filelist["name"].iloc[index]
+    with h5py.File(filename, "r") as f:
+        for k in f[name]:
+            print(k)
+
+
 def load_result(folder: str, index: int):
     """Load the result from a HDF5 file"""
     folder = Path(folder)
@@ -984,9 +994,7 @@ def process_file(root: Path, dst: Path, index: int):
         print(f"filepath '{ipath}'")
 
     # process the file
-    img, cell_mask, cell_trj, diff, flow, rho, div, blob_labels, blob_trj = process(
-        ipath
-    )
+    pimg, cell_lbl, cell_trj, cell_flow, dna_lbl, dna_trj, dna_flow = process(ipath)
 
     # Save the results as a hdf5 file
     h5_path = dst / f"{index:06d}.h5"
@@ -997,30 +1005,26 @@ def process_file(root: Path, dst: Path, index: int):
     save_result(
         h5_path,
         filename.stem,
-        img,
-        cell_mask,
+        pimg,
+        cell_lbl,
         cell_trj,
-        diff,
-        flow,
-        rho,
-        div,
-        blob_labels,
-        blob_trj,
+        cell_flow,
+        dna_lbl,
+        dna_trj,
+        dna_flow,
     )
 
     # export data as csv
     df = record(
         index,
         filename,
-        img,
-        cell_mask,
+        pimg,
+        cell_lbl,
         cell_trj,
-        diff,
-        flow,
-        rho,
-        div,
-        blob_labels,
-        blob_trj,
+        cell_flow,
+        dna_lbl,
+        dna_trj,
+        dna_flow,
     )
     csv_path = dst / f"{index:06d}.csv"
     print(f"Saving csv file {csv_path}")
@@ -1030,13 +1034,13 @@ def process_file(root: Path, dst: Path, index: int):
     strip_path = dst / f"{index:06d}-strip.jpg"
     create_strip(
         filename.stem,
-        img,
-        cell_mask,
-        diff,
-        flow,
-        rho,
-        div,
-        blob_labels,
+        pimg,
+        cell_lbl,
+        cell_trj,
+        cell_flow,
+        dna_lbl,
+        dna_trj,
+        dna_flow,
         "Greys",
         selection=slice(0, 200, 20),
         quiver=False,
@@ -1048,15 +1052,13 @@ def process_file(root: Path, dst: Path, index: int):
     create_figure(
         index,
         filename.name,
-        img,
-        cell_mask,
+        pimg,
+        cell_lbl,
         cell_trj,
-        diff,
-        flow,
-        rho,
-        div,
-        blob_labels,
-        blob_trj,
+        cell_flow,
+        dna_lbl,
+        dna_trj,
+        dna_flow,
         frame="auto",
     )
     plt.savefig(fig_path)
