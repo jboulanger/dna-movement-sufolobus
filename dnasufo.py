@@ -33,12 +33,20 @@ def segment_watershed(mask: np.ndarray, r: float = 5.0):
     return labels.astype(np.uint32)
 
 
-def preprocess(img: np.ndarray, background: float, scale=[1, 0, 0.85, 0.85]):
+def preprocess(img: np.ndarray, background: float, scale=[1, 0, 0.85, 0.85], niter=10):
     """Preprocess the image sequence with a gaussian blur"""
-    return np.maximum(
+
+    u = np.maximum(
         ndi.gaussian_filter(img.astype(float) - background, scale),
         0,
     )
+
+    for _ in range(niter):
+        u = u * ndi.gaussian_filter(
+            img / ndi.gaussian_filter(u + background, [0, 0, 2, 2]),
+            [0, 0, 2, 2],
+        )
+    return u
 
     # return np.maximum(
     #     ndi.median_filter(
@@ -421,23 +429,6 @@ def process(filename: str, channels=[0, 1]):
     dna_trj: np.ndarray
     dna_flow : np.ndarray
         estimated optical flow [L,2,H,W]
-
-    img: np.ndarray
-        original image as [L,C,H,W]
-    mask: np.ndarray
-        segmentation masks [L,1,H,W]
-    position: np.ndarray
-        positions of the cell of time [L,2]
-    speed: np.ndarray
-        speed of the cell of time [L,2]
-    diff: np.ndarray
-        frame difference [L,1,H,W]
-    flow: np.ndarray
-        estimated optical flow corrected from the cell speed [L,2,H,W]
-    rho: np.ndarray
-        momentum rho.v [L,2,H,W]
-    div: np.ndarray
-        divergence of the momentum (div(rho.v))[L,1,H,W]
 
     Note
     ----
