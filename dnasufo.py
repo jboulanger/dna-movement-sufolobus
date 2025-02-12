@@ -437,7 +437,7 @@ def process(filename: str, channels=[0, 1]):
 
     img = tifffile.imread(filename)
     pimg = preprocess(img, 100)
-    pimg2 = preprocess(img, 100, scale=[3, 0, 2, 2])
+    pimg2 = preprocess(img, 100, scale=[3, 0, 2, 2], niter=0)
     cell_lbl, cell_trj = segment_and_track_cell(pimg2)
     # dna_diff = frame_differences(pimg[:, 1])
     cell_flow = compute_flow(pimg[:, channels[0]], 20)
@@ -625,7 +625,7 @@ def split_frame(df):
     df:pd.DataFrame
 
     """
-    k = np.where(np.array(df["cell area"]) < 0.6 * df["cell area"].max())[0]
+    k = np.where(np.array(df["cell area"]) < 0.7 * df["cell area"].max())[0]
     if len(k) > 0:
         frame = df["frame"].iloc[k[0]].item()
     else:

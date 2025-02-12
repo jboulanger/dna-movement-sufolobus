@@ -9,10 +9,10 @@
 
 
 echo "TASK ID : $SLURM_ARRAY_TASK_ID"
+git rev-parse --short HEAD
 
 r=/cephfs2/jparham/
-d=/cephfs2/jeromeb/userdata/Baum_group/jparham/Analysis8
-
+d=/cephfs2/jeromeb/userdata/Baum_group/jparham/Analysis9
 
 time apptainer exec \
 	--writable-tmpfs \
