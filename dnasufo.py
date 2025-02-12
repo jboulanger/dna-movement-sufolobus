@@ -149,7 +149,10 @@ def segment_and_track_cell(img: np.ndarray, model=None):
     for t, frame in enumerate(img):
         # segment the cells
         method = "cellpose"
-        labels[t, 0] = model.eval(frame, diameter=22)[0]
+        try:
+            labels[t, 0] = model.eval(frame, diameter=22)[0]
+        except:
+            print("Cellpose failed")
 
         if labels[t, 0].max() == 0:
             method = "watershed"
@@ -1038,8 +1041,8 @@ def process_file(root: Path, dst: Path, index: int):
     if not ipath.exists():
         print(f"filepath '{ipath}' does not exist")
         exit(1)
-    else:
-        print(f"filepath '{ipath}'")
+
+    print(f"filepath '{ipath}'")
 
     # process the file
     pimg, cell_lbl, cell_trj, cell_flow, dna_lbl, dna_trj, dna_flow = process(ipath)
