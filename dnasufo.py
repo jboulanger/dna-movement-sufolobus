@@ -6,6 +6,7 @@ from skimage import measure
 from skimage.registration import optical_flow_ilk
 import tifffile
 import pandas as pd
+import torch
 from cellpose import models
 import h5py
 import matplotlib.pyplot as plt
@@ -441,6 +442,7 @@ def process(filename: str, channels=[0, 1]):
     img = tifffile.imread(filename)
     pimg = preprocess(img, 100)
     pimg2 = preprocess(img, 100, scale=[3, 0, 2, 2], niter=0)
+    print("Image shape", pimg.shape, pimg2.shape)
     cell_lbl, cell_trj = segment_and_track_cell(pimg2)
     # dna_diff = frame_differences(pimg[:, 1])
     cell_flow = compute_flow(pimg[:, channels[0]], 20)
@@ -1029,7 +1031,7 @@ def process_file(root: Path, dst: Path, index: int):
         path to the result folder containing a `filelist.csv`
 
     """
-
+    print("cuda", torch.cuda.is_available())
     # Determine the file name from the list of files in the dst folder
     if not (dst / "filelist.csv").exists():
         raise (f"The folder {dst} has no filelist.csv. Run the 'list' command first.")
@@ -1066,6 +1068,8 @@ def process_file(root: Path, dst: Path, index: int):
     )
 
     # export data as csv
+    csv_path = dst / f"{index:06d}.csv"
+    print(f"Saving csv file {csv_path}")
     df = record(
         index,
         filename,
@@ -1077,12 +1081,14 @@ def process_file(root: Path, dst: Path, index: int):
         dna_trj,
         dna_flow,
     )
-    csv_path = dst / f"{index:06d}.csv"
-    print(f"Saving csv file {csv_path}")
     df.to_csv(csv_path)
 
+    fig_path = dst / f"{index:06d}.jpg"
+    print("Saving figure", fig_path)
     # create a strip visualization
+
     create_strip(
+        index,
         filename.stem,
         pimg,
         cell_lbl,
@@ -1134,7 +1140,7 @@ def process_file(root: Path, dst: Path, index: int):
         + fig_data.shape[1] // 2,
         :,
     ] = fig_data
-    fig_path = dst / f"{index:06d}.jpg"
+
     plt.imsave(fig_path, data)
 
 

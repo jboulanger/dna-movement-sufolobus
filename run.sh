@@ -10,6 +10,7 @@
 
 echo "TASK ID : $SLURM_ARRAY_TASK_ID"
 git rev-parse --short HEAD
+date 
 
 r=/cephfs2/jparham/
 d=/cephfs2/jeromeb/userdata/Baum_group/jparham/Analysis9
@@ -23,3 +24,5 @@ time apptainer exec \
 	--root $r\
 	--dst $d\
 	--index $SLURM_ARRAY_TASK_ID
+	
+date
