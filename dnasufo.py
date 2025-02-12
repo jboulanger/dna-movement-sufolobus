@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import colorsys
 import math
 import trackpy as tp
+import io
 
 
 def contrast(x: np.ndarray):
@@ -535,7 +536,23 @@ def check_h5(folder, index):
 
 
 def load_result(folder: str, index: int):
-    """Load the result from a HDF5 file"""
+    """Load the result from a HDF5 file
+
+    Returns
+    -------
+    name: str
+        name of the h5 group (filename)
+    pimg:
+        smooted image
+    cell_lbl: np.ndarray
+        cell segmentation mask
+    cell_trj
+    cell_flow
+    dna_lbl
+    dna_trj
+    dna_flow
+
+    """
     folder = Path(folder)
     filename = folder / f"{index:06d}.h5"
     filelist = pd.read_csv(folder / "filelist.csv")
@@ -688,7 +705,7 @@ def create_figure(
             ax[k + 1].set(box_aspect=1, title=col)
 
     fig.set_tight_layout(True)
-    plt.suptitle(name)
+    plt.suptitle(f"{index}:{name}")
 
 
 def figure(folder: Path, index: int, frame=0):
@@ -727,6 +744,7 @@ def figure(folder: Path, index: int, frame=0):
         dna_lbl,
         dna_trj,
         dna_flow,
+        frame,
     )
 
 
@@ -754,6 +772,7 @@ def vec2rgb(x):
 
 
 def create_strip(
+    index,
     name,
     pimg,
     cell_lbl,
@@ -767,6 +786,25 @@ def create_strip(
     quiver=False,
 ):
     """Create a strip visualization"""
+
+    # Select frame around the split frame
+    if selection == "auto":
+        df = record(
+            index,
+            name,
+            pimg,
+            cell_lbl,
+            cell_trj,
+            cell_flow,
+            dna_lbl,
+            dna_trj,
+            dna_flow,
+        )
+        frame = split_frame(df)
+        start_frame = max(0, frame - 100)
+        end_frame = min(pimg.shape[0] - 1, frame + 100)
+        selection = slice(start_frame, end_frame, 10)
+
     dna_diff = frame_differences(pimg[:, 1])
     dna_rho = momentum(pimg[:-1, 1], dna_flow)
     dna_div = divergence(dna_rho)
@@ -866,12 +904,12 @@ def create_strip(
         ax[4, k].set_axis_off()
         ax[4, 0].text(-10, pimg.shape[2] / 2, "div", rotation=90)
 
-    fig.suptitle(Path(name).stem)
+    fig.suptitle(f"{index}:{Path(name).stem}")
     plt.subplots_adjust(wspace=0, hspace=0)
 
 
 def strip(
-    filename,
+    folder,
     index,
     colormap="Greys",
     selection=None,
@@ -879,18 +917,27 @@ def strip(
 ):
     """Create a strip illustration with vignette etc"""
 
-    name, img, cell_mask, _, diff, flow, rho, div, blob_labels, _ = load_result(
-        filename, index
-    )
-    create_strip(
+    (
         name,
-        img,
-        cell_mask,
-        diff,
-        flow,
-        rho,
-        div,
-        blob_labels,
+        pimg,
+        cell_lbl,
+        cell_trj,
+        cell_flow,
+        dna_lbl,
+        dna_trj,
+        dna_flow,
+    ) = load_result(folder, index)
+
+    create_strip(
+        index,
+        name,
+        pimg,
+        cell_lbl,
+        cell_trj,
+        cell_flow,
+        dna_lbl,
+        dna_trj,
+        dna_flow,
         colormap,
         selection,
         quiver,
@@ -967,6 +1014,16 @@ def list_files(root: Path, dst: Path):
     return filelist
 
 
+def get_figure_data():
+    """Figure as a numpy array"""
+    with io.BytesIO() as buff:
+        plt.savefig(buff, format="raw")
+        buff.seek(0)
+        data = np.frombuffer(buff.getvalue(), dtype=np.uint8)
+    w, h = plt.gcf().canvas.get_width_height()
+    return data.reshape((int(h), int(w), -1))
+
+
 def process_file(root: Path, dst: Path, index: int):
     """Process a single item from the filelist.csv stored in the dest folder
 
@@ -1031,7 +1088,6 @@ def process_file(root: Path, dst: Path, index: int):
     df.to_csv(csv_path)
 
     # create a strip visualization
-    strip_path = dst / f"{index:06d}-strip.jpg"
     create_strip(
         filename.stem,
         pimg,
@@ -1042,13 +1098,13 @@ def process_file(root: Path, dst: Path, index: int):
         dna_trj,
         dna_flow,
         "Greys",
-        selection=slice(0, 200, 20),
+        selection="auto",
         quiver=False,
     )
-    plt.savefig(strip_path)
+    # save the figure in a numpy array
+    strip_data = get_figure_data()
 
     # create a figure with intensities over time
-    fig_path = dst / f"{index:06d}-figure.jpg"
     create_figure(
         index,
         filename.name,
@@ -1061,7 +1117,31 @@ def process_file(root: Path, dst: Path, index: int):
         dna_flow,
         frame="auto",
     )
-    plt.savefig(fig_path)
+    fig_data = get_figure_data()
+
+    # concaternate both arrays
+    data = 255 * np.ones(
+        [
+            strip_data.shape[0] + fig_data.shape[0],
+            max(strip_data.shape[1], fig_data.shape[1]),
+            4,
+        ],
+        dtype=np.uint8,
+    )
+    data[
+        : strip_data.shape[0],
+        data.shape[1] // 2 - strip_data.shape[1] // 2 : data.shape[1] // 2
+        + strip_data.shape[1] // 2,
+        :,
+    ] = strip_data
+    data[
+        strip_data.shape[0] : strip_data.shape[0] + fig_data.shape[0],
+        data.shape[1] // 2 - fig_data.shape[1] // 2 : data.shape[1] // 2
+        + fig_data.shape[1] // 2,
+        :,
+    ] = fig_data
+    fig_path = dst / f"{index:06d}.jpg"
+    plt.imsave(fig_path, data)
 
 
 def _process_file(args):
