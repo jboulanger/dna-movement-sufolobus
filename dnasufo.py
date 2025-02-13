@@ -817,9 +817,13 @@ def create_strip(
         *[np.arange(0, n) for n in [pimg.shape[2], pimg.shape[3]]], indexing="xy"
     )
     if selection is None:
-        indices = np.arange(0, pimg.shape[0], 20)
+        indices = np.arange(0, pimg.shape[0] - 1, 20)
     else:
-        indices = np.arange(selection.start, selection.stop, selection.step)
+        indices = np.arange(
+            max(0, selection.start),
+            min(selection.stop, pimg.shape[0] - 1),
+            selection.step,
+        )
     fig, ax = plt.subplots(5, len(indices), figsize=(len(indices), 5))
     dmax = (np.abs(dna_diff) * cell_lbl[:-1]).max() / 2
     vmax = (np.linalg.norm(dna_flow, axis=1)).max() / 2
@@ -1105,7 +1109,7 @@ def process_file(root: Path, dst: Path, index: int):
         dna_trj,
         dna_flow,
         "Greys",
-        selection=slice(0, len(pimg), len(pimg) // 10),
+        selection=None,
         quiver=False,
     )
     # save the figure in a numpy array
