@@ -152,7 +152,7 @@ def segment_and_track_cell(img: np.ndarray, model=None):
         method = "cellpose"
         try:
             labels[t, 0] = model.eval(frame, diameter=22)[0]
-        except:
+        except:  # noqa: E722
             print("Cellpose failed")
 
         if labels[t, 0].max() == 0:
@@ -204,6 +204,7 @@ def segment_and_track_cell(img: np.ndarray, model=None):
     # massage the dataframe
     df = pd.concat(df, ignore_index=True)
 
+    # add extra measurements
     df["spread"] = np.sqrt(
         df["moments_weighted_normalized-2-0"] + df["moments_weighted_normalized-0-2"]
     )
@@ -218,16 +219,17 @@ def segment_and_track_cell(img: np.ndarray, model=None):
         + np.square(df["centroid-1"] - img.shape[3] / 2)
     )
 
-    # track the cells with trackpy
-    tp.quiet()
-    trj = tp.link(df, search_range=40, pos_columns=["centroid-0", "centroid-1"])
+    # Track the cells with trackpy
+    # tp.quiet()
+    # trj = tp.link(df, search_range=40, pos_columns=["centroid-0", "centroid-1"])
 
     # Keep the cell the most at the center at frame 0
-    cell_to_keep = np.argmin(trj[trj["frame"] == 0]["distance_to_center"])
-    trj = trj[trj["particle"] == cell_to_keep]
+    # cell_to_keep = np.argmin(trj[trj["frame"] == 0]["distance_to_center"])
+    # trj = trj[trj["particle"] == cell_to_keep]
 
-    # center = np.array([img.shape[2], img.shape[3]]) / 2
-    # trj = link(df, center)
+    # Track the cell with nearest neighbor (easier to follow the correct cell all along)
+    center = np.array([img.shape[2], img.shape[3]]) / 2
+    trj = link(df, center)
 
     # set the labels as the track id
     tracked_labels = np.zeros(labels.shape, dtype=np.uint8)
@@ -630,11 +632,14 @@ def split_frame(df):
     df:pd.DataFrame
 
     """
-    k = np.where(np.array(df["cell area"]) < 0.7 * df["cell area"].max())[0]
-    if len(k) > 0:
-        frame = df["frame"].iloc[k[0]].item()
-    else:
-        frame = 0
+    delta = np.diff(ndi.gaussian_filter1d(np.array(df["cell area"]).astype(float), 10))
+    frame = np.argmin(delta)
+    # print(k)
+    # # k = np.where(np.array(df["cell area"]) < 0.7 * df["cell area"].max())[0]
+    # if len(k) > 0:
+    #     frame = df["frame"].iloc[k].item()
+    # else:
+    #     frame = 0
     return frame
 
 
@@ -1081,6 +1086,8 @@ def process_file(root: Path, dst: Path, index: int):
         dna_trj,
         dna_flow,
     )
+    ref_frame = split_frame(df)
+    df["sync frame"] = df["frame"] - ref_frame
     df.to_csv(csv_path)
 
     fig_path = dst / f"{index:06d}.jpg"
@@ -1098,7 +1105,7 @@ def process_file(root: Path, dst: Path, index: int):
         dna_trj,
         dna_flow,
         "Greys",
-        selection="auto",
+        selection=(0, len(pimg), len(pimg) // 10),
         quiver=False,
     )
     # save the figure in a numpy array
