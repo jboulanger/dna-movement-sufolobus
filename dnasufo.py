@@ -1105,7 +1105,7 @@ def process_file(root: Path, dst: Path, index: int):
         dna_trj,
         dna_flow,
         "Greys",
-        selection=(0, len(pimg), len(pimg) // 10),
+        selection=slice(0, len(pimg), len(pimg) // 10),
         quiver=False,
     )
     # save the figure in a numpy array
