@@ -15,7 +15,7 @@ date
 r=/cephfs2/jparham/
 d=/cephfs2/jeromeb/userdata/Baum_group/jparham/Analysis9
 
-time apptainer exec \
+time apptainer exec --nv \
 	--writable-tmpfs \
 	--bind /cephfs2:/cephfs2,/cephfs:/cephfs,/lmb:/lmb \
 	/public/singularity/containers/lightmicroscopy/bioimaging-container/bioimaging.sif \
