@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dnasufo"
+version = "0.0.1"
+dependencies = [
+  "numpy",
+  "scipy",
+  "h5py",
+  "cellpose",
+  "torch",
+  "torchvision",
+  "scikit-image",
+  "matplotlib",
+  "pandas",
+  "tables",
+  "h5py",
+  "tifffile"
+]
+
+requires-python = ">=3.0"
+
+[tool.ruff]
+exclude = [".git","build",".vscode"]
+extend-include = ["*.ipynb"]
+
+line-length = 88
+indent-width = 4
+
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+ignore = ["B"]
+fixable = ["ALL"]
+unfixable = []
+
+[tool.ruff.format]
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"

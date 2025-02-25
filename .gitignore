@@ -6,3 +6,4 @@ Example*
 *.h5
 *.xlsx
 *.out
+.venv/*

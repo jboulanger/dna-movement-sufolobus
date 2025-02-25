@@ -1,3 +1,9 @@
+"""
+Quantification of DNA motion in Sufolobus archeas
+
+Jerome Boulanger 2024-2025
+"""
+
 from pathlib import Path
 import numpy as np
 import scipy.ndimage as ndi
@@ -17,16 +23,50 @@ import io
 
 
 def contrast(x: np.ndarray):
-    """Stretch the contrast to 0,1"""
+    """Stretch the contrast to 0, 1
+
+    Parameters
+    ----------
+    x : np.ndarray
+
+    Returns
+    -------
+    np.ndarray: array with stretched contrast
+
+    """
     return (x - x.min()) / (x.max() - x.min())
 
 
-def uv2rgb(x: np.ndarray):
-    """Transform a two channel image to rgb"""
+def uv2rgb(x: np.ndarray) -> np.ndarray:
+    """Transform a two channel image to rgb
+
+    Parameters
+    ----------
+    x : array_like
+        array [2,H,W] where the first axis represent the channel.
+
+    Returns
+    -------
+    np.ndarray: magenta/green coded rgb array (channel in last axis)
+
+    """
     return np.stack([contrast(x[0]), contrast(x[1]), contrast(x[0])], -1)
 
 
-def segment_watershed(mask: np.ndarray, r: float = 5.0):
+def segment_watershed(mask: np.ndarray, r: float = 5.0) -> np.ndarray:
+    """Split the mask using a distance transform and watershed
+
+    Parameters
+    ----------
+    mask: np.ndarray
+        binary mask
+    r: float, optional
+        radius separating local maxima of the distance transform
+
+    Returns
+    -------
+    np.ndarray: label image as int32
+    """
     d = ndi.gaussian_filter(ndi.distance_transform_edt(mask), r / 2.0) * mask
     seed = (ndi.label(d == ndi.maximum_filter(d, r))[0] * mask).astype(np.uint32)
     labels = segmentation.watershed(-d, seed) * mask
@@ -34,8 +74,26 @@ def segment_watershed(mask: np.ndarray, r: float = 5.0):
     return labels.astype(np.uint32)
 
 
-def preprocess(img: np.ndarray, background: float, scale=[1, 0, 0.85, 0.85], niter=10):
-    """Preprocess the image sequence with a gaussian blur"""
+def preprocess(
+    img: np.ndarray, background: float, scale=[1, 0, 0.85, 0.85], niter=10
+) -> np.ndarray:
+    """Preprocess the image sequence with a gaussian blur and Richardson Lucy deconvolution
+
+    Parameters
+    ----------
+    img: np.ndarray
+        Array with axes [T,C,H,W]
+    background: float
+        Background level (will be subtracted)
+    scale: list
+        List of sigma for each axes of the input
+    niter: int
+        Number of step for the Richardson-Lucy debluring
+
+    Returns
+    -------
+    np.ndarray: preprocessed  [T,C,H,W] array
+    """
 
     u = np.maximum(
         ndi.gaussian_filter(img.astype(float) - background, scale),
@@ -49,17 +107,21 @@ def preprocess(img: np.ndarray, background: float, scale=[1, 0, 0.85, 0.85], nit
         )
     return u
 
-    # return np.maximum(
-    #     ndi.median_filter(
-    #         ndi.gaussian_filter(img.astype(float) - background, [3, 0, 1, 1]),
-    #         [3, 1, 1, 1],
-    #     ),
-    #     0,
-    # )
 
+def link(df:pd.DataFrame, center):
+    """Link one objects at the center over time using the nearest neighbor
 
-def link(df, center):
-    """Link one objects over time using the nearest neighbor"""
+    Parameters
+    ----------
+    df: pd.Dataframe
+        Dataframe with centroid-0 and centroid-1
+    center: np.ndarray
+        coordinate of the center [H,W]
+
+    Returns
+    -------
+    pd.DataFrame: coordinates of the object
+    """
     trj = []
     for frame in range(df["frame"].max()):
         sdf = df[df["frame"] == frame]
@@ -241,7 +303,7 @@ def segment_and_track_cell(img: np.ndarray, model=None):
 
 
 def segment_and_track_dna_blobs(img, mask):
-    """Analyze the blobs of DNA
+    """Analyze the blobs of DNA and track them using trackpy
 
     Parameters
     ----------
@@ -409,6 +471,7 @@ def average(value: np.ndarray, weights: np.ndarray) -> np.ndarray:
 
 
 def sum_intensity(mask, image):
+    """"Sum the intensiyt"""
     return [np.sum((mask == level) * image) for level in np.unique(mask) if level > 0]
 
 
@@ -571,7 +634,33 @@ def load_result(folder: str, index: int):
 def record(
     index, filename, pimg, cell_lbl, cell_trj, cell_flow, dna_lbl, dna_trj, dna_flow
 ):
-    """Record the results in a dataframe"""
+    """Compute and record the time averages in a dataframe
+    
+    Parameters
+    ----------
+    index : int
+        index of the file
+    filename : str
+        Name of the file
+    pimg : np.ndarray
+        Preprocessed data
+    cell_lbl : np.ndarray
+        Segmentation mask of the cell
+    cell_trj: pd.DataFrame
+        Trajectory of the cell
+    cell_flow: np.ndarray
+        Estimated motion in the cell channel
+    dna_lbl: np.ndarray
+        Segmentation mask of the DNA marker
+    dna_trj: pd.DataFrame
+        Trajectory of the DNA blobs
+    dna_flow: np.ndarray
+        Estimated motion in the DNA channel
+
+    Returns
+    -------
+    pd.Dataframe
+    """
     dna_diff = frame_differences(pimg[:, 1])
     dna_rho = momentum(pimg[:-1, 1], dna_flow)
     dna_div = divergence(dna_rho)
@@ -631,6 +720,10 @@ def split_frame(df):
     ----------
     df:pd.DataFrame
 
+    Returns
+    -------
+    int : Frame index
+
     """
     delta = np.diff(ndi.gaussian_filter1d(np.array(df["cell area"]).astype(float), 10))
     frame = np.argmin(delta)
@@ -657,7 +750,29 @@ def create_figure(
 ):
     """Create a figure with graphs over time
 
-    The figure has 3 rows and 4 columns
+    The figure has 3 rows and 4 columns.
+
+    Parameters
+    ----------
+    index : int
+        index of the file
+    filename : str
+        Name of the file
+    pimg : np.ndarray
+        Preprocessed data
+    cell_lbl : np.ndarray
+        Segmentation mask of the cell
+    cell_trj: pd.DataFrame
+        Trajectory of the cell
+    cell_flow: np.ndarray
+        Estimated motion in the cell channel
+    dna_lbl: np.ndarray
+        Segmentation mask of the DNA marker
+    dna_trj: pd.DataFrame
+        Trajectory of the DNA blobs
+    dna_flow: np.ndarray
+        Estimated motion in the DNA channel
+
     """
 
     df = record(
@@ -786,7 +901,36 @@ def create_strip(
     selection=None,
     quiver=False,
 ):
-    """Create a strip visualization"""
+    """Create a strip visualization
+
+    Parameters
+    ----------
+    index : int
+        index of the file
+    filename : str
+        Name of the file
+    pimg : np.ndarray
+        Preprocessed data
+    cell_lbl : np.ndarray
+        Segmentation mask of the cell
+    cell_trj: pd.DataFrame
+        Trajectory of the cell
+    cell_flow: np.ndarray
+        Estimated motion in the cell channel
+    dna_lbl: np.ndarray
+        Segmentation mask of the DNA marker
+    dna_trj: pd.DataFrame
+        Trajectory of the DNA blobs
+    dna_flow: np.ndarray
+        Estimated motion in the DNA channel
+    colormap: str
+        name of the colormap 
+    selection: slice | None
+        Select the frame to display using a slice : slice(start, stop, step)
+    quiver: Bool
+        Switch between quiver and streamline representation of the vector flow
+
+    """
 
     # Select frame around the split frame
     if selection == "auto":
@@ -1020,7 +1164,12 @@ def list_files(root: Path, dst: Path):
 
 
 def get_figure_data():
-    """Figure as a numpy array"""
+    """Figure as a numpy array
+    
+    Returns
+    -------
+    np.ndarray : array [H,W,4] image of the figure
+    """
     with io.BytesIO() as buff:
         plt.savefig(buff, format="raw")
         buff.seek(0)
