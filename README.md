@@ -35,14 +35,23 @@ Several motion metrics are reported:
 ```
 
 ## Installation
+
 Clone the repository using :
 ```bash
 git clone
 ```
-Create an conda/mamba/micromamba environment using:
+To create an environment, using conda/mamba/micromamba environment:
 ```bash
 conda create -f environment.yml
 ```
+Or with pip + venv:
+```
+python -m venv  .venv
+source .venv/bin/actiate.sh
+pip install -e .
+```
+
+
 
 ## Usage
 The analysis can be run in notebooks or using a command line.
