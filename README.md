@@ -1,15 +1,18 @@
+
+![logo](assets/logo.png =100x100)
+
 # Analysis of DNA movement in Sufolobus
 
-Measurement of DNA movement in Sufolobus.
 
-Several motion metrics are reported:
+
+In this project, the DNA movement in Sufolobus cells during mitosis acquired in fluorescence microscopy with a membrane marker and a DNA marker is quantified. Events are first identified manually and cropped as small 60x60 pixels vignettes from the acquired data. Cells are then segmented using cellpose with the membrane and DNA markers channels and subsequently tracked using trackpy. Finally, motion is estimate using a Lucas and Kanade motion estimation and several metrics are reported:
 - average of the frame difference magnitude of the DNA channel in the cell
 - average of the norm of the optical flow estimated with a Lucas and Kanade approach
 - average of the norm of the momentum (product of the intensity by the displacement)
 - divergence of the norm of the momentum
-- number of segmented dna blob
-- total area of the dna blobs
-- asymmetry of the dna blobs
+- number of segmented DNA blob
+- total area of the DNA blobs
+- asymmetry of the DNA blobs
 
 ## Data organization
 
@@ -19,7 +22,7 @@ Several motion metrics are reported:
 │   ├── filelist.csv
 │   ├── result.csv
 │   └── result.h5
-└── source
+└── root
     ├── Condition1
     │    ├── Crop
     │    │    ├── img001.tif
@@ -38,26 +41,24 @@ Several motion metrics are reported:
 
 Clone the repository using :
 ```bash
-git clone
+git clone https://github.com/jboulanger/dna-movement-sufolobus
 ```
-To create an environment, using conda/mamba/micromamba environment:
-```bash
-conda create -f environment.yml
-```
-Or with pip + venv:
+To create an environment, using using pip + venv:
 ```bash
 python -m venv  .venv
-source .venv/bin/activate.sh
+source .venv/bin/activate
 pip install -e .
 ```
+or use the conda recipe.
 
 ## Usage
 The analysis can be run in notebooks or using a command line.
 
 ### Using a notebook
+- 0_Example.ipynb: run an example on a synthetic dataset
 - 1_List_files.ipynb: list files and store the list into filelist.csv.
 - 2_Process.ipynb: measure motion in TIF files and save results in a h5 files.
-- 2_Visualization.ipynb: visualize the results saved in the h5 files.
+- 3_Visualization.ipynb: visualize the results saved in the h5 files.
     
 ### Using the command line
 - List all files at the `ROOTDIR` folder in the `Crop` subfolders.
@@ -70,5 +71,5 @@ python dnasufo.py process --root $ROOTDIR --dst $DSTDIR --index 0
 ```
 - Use a slurm script to process all files on a HPC:
 ```bash
-sbatch -a 0-239 run.sh
+sbatch -a 0-239 script/run.sh
 ```
