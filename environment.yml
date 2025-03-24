@@ -5,6 +5,7 @@ channels:
   - nvidia
 dependencies:
   - python
+  - ipykernel
   - pytorch-cuda=12.4
   - torchvision
   - pip
@@ -14,6 +15,9 @@ dependencies:
   - pytables
   - h5py
   - tifffile
+  - pytest
+  - dask
+  - distributed
   - pip:
     - cellpose
     - trackpy

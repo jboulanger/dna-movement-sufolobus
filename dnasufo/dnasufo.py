@@ -22,6 +22,76 @@ import trackpy as tp
 import io
 
 
+def example(shape):
+    """Create a test dataset"""
+    img = np.zeros(shape)
+    t = np.arange(shape[0])
+    angle = np.pi / 2  # np.random.uniform(0, np.pi)
+    center = np.array([shape[-2], shape[-1]]).reshape((2, 1))
+    delta = 0.5 + np.arctan(t - shape[0] / 2) / np.pi
+    p1 = np.stack(
+        (
+            t,
+            shape[1] * (0.5 + np.cos(angle) * delta / 5),
+            shape[2] * (0.5 + np.sin(angle) * delta / 5),
+        )
+    ).astype(int)
+    p2 = np.stack(
+        (
+            t,
+            center[0] * (0.5 + np.cos(-angle) * delta / 5),
+            center[1] * (0.5 + np.sin(-angle) * delta / 5),
+        )
+    ).astype(int)
+    img[tuple(p1)] = 1
+    img[tuple(p2)] = 1
+    img2 = ndi.gaussian_filter(img, [0, 3, 3])
+    img1 = (ndi.gaussian_filter(img, [0, 3, 3]) > 0.0001) & (
+        ndi.gaussian_filter(img, [0, 3, 3]) < 0.0005
+    )
+    img1 = ndi.gaussian_filter(img1.astype(float), [0, 2, 2])
+    # plt.imshow(img2[9])
+    data = np.stack((img1 / img1.max(), img2 / img2.max()), 1)
+    data = 100 + 50 * data / data.max()
+    data = data + np.random.normal(0, 5, data.shape)
+
+    img = np.zeros(shape)
+    t = np.arange(shape[0])
+    angle = np.pi / 2  # np.random.uniform(0, np.pi)
+
+    center = np.array([shape[-2], shape[-1]]).reshape((2, 1))
+    delta = 0.5 + np.arctan(t - shape[0] / 2) / np.pi
+    p1 = np.stack(
+        (
+            t,
+            shape[1] * (0.5 + np.cos(angle) * delta / 5),
+            shape[2] * (0.5 + np.sin(angle) * delta / 5),
+        )
+    ).astype(int)
+    p2 = np.stack(
+        (
+            t,
+            center[0] * (0.5 + np.cos(-angle) * delta / 5),
+            center[1] * (0.5 + np.sin(-angle) * delta / 5),
+        )
+    ).astype(int)
+    img[tuple(p1)] = 1
+    img[tuple(p2)] = 1
+
+    img1 = (ndi.gaussian_filter(img, [0, 3, 3]) > 0.0001) & (
+        ndi.gaussian_filter(img, [0, 3, 3]) < 0.0005
+    )
+    img1 = ndi.gaussian_filter(img1.astype(float), [0, 2, 2])
+
+    img2 = ndi.gaussian_filter(img, [0, 3, 3])
+    # plt.imshow(img2[9])
+    data = np.stack((img1 / img1.max(), img2 / img2.max()), 1)
+    data = 100 + 50 * data / data.max()
+    data = data + np.random.normal(0, 5, data.shape)
+
+    return data
+
+
 def contrast(x: np.ndarray):
     """Stretch the contrast to 0, 1
 
@@ -108,7 +178,7 @@ def preprocess(
     return u
 
 
-def link(df:pd.DataFrame, center):
+def link(df: pd.DataFrame, center):
     """Link one objects at the center over time using the nearest neighbor
 
     Parameters
@@ -243,25 +313,27 @@ def segment_and_track_cell(img: np.ndarray, model=None):
             print(f"Abort tracking at frame {t}. Intensity is zeros in mask.")
             break
 
-        tmp = pd.DataFrame(
-            measure.regionprops_table(
-                labels[t, 0],
-                img[t, 1],
-                properties=(
-                    "centroid",
-                    "area",
-                    "mean_intensity",
-                    "label",
-                    "moments_weighted_normalized",
-                    "moments_weighted_hu",
-                ),
+        # if the label is not empty
+        if labels[t, 0].max() > 0:
+            tmp = pd.DataFrame(
+                measure.regionprops_table(
+                    labels[t, 0],
+                    img[t, 1],
+                    properties=(
+                        "centroid",
+                        "area",
+                        "mean_intensity",
+                        "label",
+                        "moments_weighted_normalized",
+                        "moments_weighted_hu",
+                    ),
+                )
             )
-        )
 
-        tmp["frame"] = t
-        tmp["segmentation"] = method
+            tmp["frame"] = t
+            tmp["segmentation"] = method
 
-        df.append(tmp)
+            df.append(tmp)
 
     # massage the dataframe
     df = pd.concat(df, ignore_index=True)
@@ -318,31 +390,33 @@ def segment_and_track_dna_blobs(img, mask):
         segmented blobs labels sorted by track length
     """
 
-    # segment the blobs
+    # preprocess the image
     blob = img.astype(float)
     blob = blob - ndi.gaussian_filter(blob, [5, 5, 5])
+    # threshold
     blob = (blob > (np.median(blob) + 0.5 * blob.std())) * mask.squeeze()
+    # smooth the mask
     for _ in range(3):
         blob = ndi.median_filter(blob, [1, 3, 3])
-
+    # apply a watershed to split the blobs frame by frame
     blob = np.stack([segment_watershed(b, 5.0) for b in blob])
-
     # get the centroids for each frame
     df = []
     for frame, labels in enumerate(blob):
-        tmp = pd.DataFrame(
-            measure.regionprops_table(
-                labels,
-                img[frame],
-                properties=(
-                    "centroid",
-                    "mean_intensity",
-                    "label",
-                ),
+        if labels.max() > 0:
+            tmp = pd.DataFrame(
+                measure.regionprops_table(
+                    labels,
+                    img[frame],
+                    properties=(
+                        "centroid",
+                        "mean_intensity",
+                        "label",
+                    ),
+                )
             )
-        )
-        tmp["frame"] = frame
-        df.append(tmp)
+            tmp["frame"] = frame
+            df.append(tmp)
 
     df = pd.concat(df, ignore_index=True)
 
@@ -471,22 +545,24 @@ def average(value: np.ndarray, weights: np.ndarray) -> np.ndarray:
 
 
 def sum_intensity(mask, image):
-    """"Sum the intensiyt"""
+    """ "Sum the intensiyt"""
     return [np.sum((mask == level) * image) for level in np.unique(mask) if level > 0]
 
 
-def process(filename: str, channels=[0, 1]):
+def process(img: np.ndarray, channels=[0, 1]):
     """Process the file
 
     Parameters
     ----------
-    filename : str
-        path to the file
+    img: np.ndarray
+        input array [T,C,H,W]
+    channels: list
+        list of the channels for membrane and DNA markers
 
     Returns
     -------
     img: np.ndarray
-        image as [L,C,H,W]
+        processed image as [L,C,H,W]
     cell_lbl: np.ndarray
         cell segmentation masks [L,1,H,W]
     cell_trj: pd.DataFrame
@@ -504,7 +580,6 @@ def process(filename: str, channels=[0, 1]):
     pimg, cell_lbl, cell_trj, cell_flow, dna_lbl, dna_trj, dna_flow = process(filename)
     """
 
-    img = tifffile.imread(filename)
     pimg = preprocess(img, 100)
     pimg2 = preprocess(img, 100, scale=[3, 0, 2, 2], niter=0)
     print("Image shape", pimg.shape, pimg2.shape)
@@ -514,7 +589,7 @@ def process(filename: str, channels=[0, 1]):
     dna_flow = compute_flow(pimg[:, channels[1]], 2)
     # rho = momentum(pimg[:-1, 1], dna_flow)
     # div = divergence(rho)
-    dna_lbl, dna_trj = segment_and_track_dna_blobs(pimg2[:, 1], cell_lbl)
+    dna_lbl, dna_trj = segment_and_track_dna_blobs(pimg2[:, channels[1]], cell_lbl)
     return pimg, cell_lbl, cell_trj, cell_flow, dna_lbl, dna_trj, dna_flow
 
 
@@ -552,6 +627,9 @@ def save_result(
     dna_flow:
         estimated optical flow on the cell [L,2,H,W]
     """
+
+    if filename.exists():
+        filename.unlink()
 
     with h5py.File(filename, "w") as f:
         f.create_group(name)
@@ -635,7 +713,7 @@ def record(
     index, filename, pimg, cell_lbl, cell_trj, cell_flow, dna_lbl, dna_trj, dna_flow
 ):
     """Compute and record the time averages in a dataframe
-    
+
     Parameters
     ----------
     index : int
@@ -924,7 +1002,7 @@ def create_strip(
     dna_flow: np.ndarray
         Estimated motion in the DNA channel
     colormap: str
-        name of the colormap 
+        name of the colormap
     selection: slice | None
         Select the frame to display using a slice : slice(start, stop, step)
     quiver: Bool
@@ -1133,7 +1211,7 @@ def make_vector(data, step: int = 2):
     )
 
 
-def list_files(root: Path, dst: Path):
+def list_files(root: Path, dst: Path, channels=[0, 1]):
     """List the files in the source folders and add them to a csv file
 
     Parameters
@@ -1142,30 +1220,38 @@ def list_files(root: Path, dst: Path):
         root of the path to the files
     dst: Path
         path to the result folfer
-
+    channels: list
+        list of 2 channels indices for cell and DNA
     Returns
     -------
     list of files
     """
 
     dst.mkdir(exist_ok=True)
-
+    print(root, channels)
     filelist = pd.DataFrame.from_records(
         [
-            {"path": x.relative_to(root), "name": x.stem, "condition": "unknown"}
+            {
+                "path": x.relative_to(root),
+                "name": x.stem,
+                "condition": "unknown",
+                "membrane": channels[0],
+                "dna": channels[1],
+            }
             for x in root.rglob("Crop*/[!.]*.tif")
         ]
     )
 
     print(f"Number of files {len(filelist)}")
     opath = dst / "filelist.csv"
+    print(f"Saving list to {opath}")
     filelist.to_csv(opath)
     return filelist
 
 
 def get_figure_data():
-    """Figure as a numpy array
-    
+    """Returns the figure content as a numpy array
+
     Returns
     -------
     np.ndarray : array [H,W,4] image of the figure
@@ -1179,7 +1265,7 @@ def get_figure_data():
 
 
 def process_file(root: Path, dst: Path, index: int):
-    """Process a single item from the filelist.csv stored in the dest folder
+    """Process a single item from the filelist.csv stored in the dest folder and save the results and figure there
 
     Parameters
     ----------
@@ -1187,6 +1273,12 @@ def process_file(root: Path, dst: Path, index: int):
         root of the path to the files
     dst: Path
         path to the result folder containing a `filelist.csv`
+    index: int
+        index of the file to process
+
+    Note
+    ----
+    This function saves the results in the dst folder as h5, csv and jpg files.
 
     """
     print("cuda", torch.cuda.is_available())
@@ -1197,6 +1289,7 @@ def process_file(root: Path, dst: Path, index: int):
     filelist = pd.read_csv(dst / "filelist.csv")
     filename = Path(filelist["path"].iloc[index])
     ipath = root / filename
+    channels = [filelist["membrane"].iloc[index], filelist["dna"].iloc[index]]
 
     if not ipath.exists():
         print(f"filepath '{ipath}' does not exist")
@@ -1204,14 +1297,17 @@ def process_file(root: Path, dst: Path, index: int):
 
     print(f"filepath '{ipath}'")
 
+    # load the file
+    img = tifffile.imread(ipath)
+
     # process the file
-    pimg, cell_lbl, cell_trj, cell_flow, dna_lbl, dna_trj, dna_flow = process(ipath)
+    pimg, cell_lbl, cell_trj, cell_flow, dna_lbl, dna_trj, dna_flow = process(
+        img, channels
+    )
 
     # Save the results as a hdf5 file
     h5_path = dst / f"{index:06d}.h5"
     print(f"Saving h5 {h5_path}")
-    if h5_path.exists():
-        h5_path.unlink()
 
     save_result(
         h5_path,
@@ -1302,43 +1398,3 @@ def process_file(root: Path, dst: Path, index: int):
     ] = fig_data
 
     plt.imsave(fig_path, data)
-
-
-def _process_file(args):
-    """Process file as a command line"""
-    process_file(Path(args.root), Path(args.dst), args.index)
-
-
-def _list_files(args):
-    """List files as a command line"""
-    list_files(Path(args.root), Path(args.dst))
-
-
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser("dna-sufolobus")
-    subparsers = parser.add_subparsers()
-
-    subparser_list = subparsers.add_parser("list")
-    subparser_list.add_argument(
-        "--root", type=Path, required=False, help="path to the source data"
-    )
-    subparser_list.add_argument(
-        "--dst", type=Path, required=True, help="path to the destination result"
-    )
-    subparser_list.set_defaults(func=_list_files)
-
-    subparser_process = subparsers.add_parser("process")
-    subparser_process.add_argument(
-        "--root", type=Path, required=False, help="root source data"
-    )
-    subparser_process.add_argument(
-        "--dst", type=Path, required=True, help="path to the destination result"
-    )
-    subparser_process.add_argument(
-        "--index", type=int, required=True, help="index of the filelist"
-    )
-    subparser_process.set_defaults(func=_process_file)
-    args = parser.parse_args()
-    args.func(args)

@@ -45,21 +45,19 @@ To create an environment, using conda/mamba/micromamba environment:
 conda create -f environment.yml
 ```
 Or with pip + venv:
-```
+```bash
 python -m venv  .venv
-source .venv/bin/actiate.sh
+source .venv/bin/activate.sh
 pip install -e .
 ```
-
-
 
 ## Usage
 The analysis can be run in notebooks or using a command line.
 
 ### Using a notebook
-- 1_List_files.ipynb: list files and store the list into filelist.csv
-- 2_Process.ipynb: measure motion in TIF files and save results in a h5 file
-- 2_Visualization.ipynb: visualize the results saved in the h5 file.
+- 1_List_files.ipynb: list files and store the list into filelist.csv.
+- 2_Process.ipynb: measure motion in TIF files and save results in a h5 files.
+- 2_Visualization.ipynb: visualize the results saved in the h5 files.
     
 ### Using the command line
 - List all files at the `ROOTDIR` folder in the `Crop` subfolders.
