@@ -1,5 +1,5 @@
 
-![logo](assets/logo.png =100x100)
+![logo](assets/logo.png)
 
 # Analysis of DNA movement in Sufolobus
 
