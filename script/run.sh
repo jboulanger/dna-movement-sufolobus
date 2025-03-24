@@ -7,13 +7,14 @@
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:1
 
+# Slurm script to process file on an HPC cluster using a container
 
 echo "TASK ID : $SLURM_ARRAY_TASK_ID"
 git rev-parse --short HEAD
 date 
 
-r=/cephfs2/jparham/
-d=/cephfs2/jeromeb/userdata/Baum_group/jparham/Analysis9
+r= # path to data folder
+d= # path to results folder
 
 time apptainer exec --nv \
 	--writable-tmpfs \
