@@ -1,0 +1,11 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+- family-names: "Boulanger"
+  given-names: "Jerome"
+  orcid: "https://orcid.org/0000-0003-0237-3743"
+title: "dna-movement-sufolobus"
+version: 1.0.0
+doi: 
+date-released: 2025-03-24
+url: "https://github.com/jboulanger/dna-movement-sufolobus"
