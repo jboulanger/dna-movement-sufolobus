@@ -1,9 +1,4 @@
-
-![logo](assets/logo.png)
-
 # Analysis of DNA movement in Sufolobus
-
-
 
 In this project, the DNA movement in Sufolobus cells during mitosis acquired in fluorescence microscopy with a membrane marker and a DNA marker is quantified. Events are first identified manually and cropped as small 60x60 pixels vignettes from the acquired data. Cells are then segmented using cellpose with the membrane and DNA markers channels and subsequently tracked using trackpy. Finally, motion is estimate using a Lucas and Kanade motion estimation and several metrics are reported:
 - average of the frame difference magnitude of the DNA channel in the cell
