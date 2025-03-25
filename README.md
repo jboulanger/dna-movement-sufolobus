@@ -16,6 +16,8 @@ In this project, the DNA movement in Sufolobus cells during mitosis acquired in 
 
 ## Data organization
 
+The data are expected to be organized as follow:
+
 ```bash
 .
 ├── results
@@ -45,9 +47,11 @@ git clone https://github.com/jboulanger/dna-movement-sufolobus
 ```
 To create an environment, using using pip + venv:
 ```bash
+cd dna-movement-sufolobus
 python -m venv  .venv
 source .venv/bin/activate
-pip install -e .
+python -m pip install --upgrade pip
+python -m pip install -e .
 ```
 or use the conda recipe.
 
@@ -57,8 +61,8 @@ The analysis can be run in notebooks or using a command line.
 ### Using a notebook
 - 0_Example.ipynb: run an example on a synthetic dataset
 - 1_List_files.ipynb: list files and store the list into filelist.csv.
-- 2_Process.ipynb: measure motion in TIF files and save results in a h5 files.
-- 3_Visualization.ipynb: visualize the results saved in the h5 files.
+- 2_Process.ipynb: segment and measure the DNA motion in cells.
+- 3_Visualization.ipynb: visualize the results saved in the results files.
     
 ### Using the command line
 - List all files at the `ROOTDIR` folder in the `Crop` subfolders.
@@ -69,7 +73,7 @@ python dnasufo.py list --root $ROOTDIR --dst $DSTDIR
 ```bash
 python dnasufo.py process --root $ROOTDIR --dst $DSTDIR --index 0
 ```
-- Use a slurm script to process all files on a HPC:
+- Use a slurm script to process all files on a HPC (please adjust the folders in the script):
 ```bash
 sbatch -a 0-239 script/run.sh
 ```

@@ -1,3 +1,4 @@
+# conda environment for a system supporting cuda
 name: dnasufo
 channels:
   - conda-forge
